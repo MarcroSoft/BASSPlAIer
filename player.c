@@ -253,8 +253,9 @@ static void startEncode(HWND hwnd)
     snprintf(g_recFile, sizeof(g_recFile),
         "recording_%04d%02d%02d_%02d%02d%02d.wav",
         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
-    /* BASS_ENCODE_PCM writes a WAV. The channel is float, so
-     * BASS_ENCODE_FP_16BIT converts to 16-bit integer (not float). */
+    /* BASS_ENCODE_PCM writes a WAV in the channel's own format. The
+     * channel is float, so this produces a 32-bit float WAV. (Add
+     * BASS_ENCODE_FP_16BIT to convert to 16-bit integer instead.) */
     if (BASS_Encode_Start(g_stream, g_recFile,
             BASS_ENCODE_PCM, NULL, NULL))
         g_rec = TRUE;
