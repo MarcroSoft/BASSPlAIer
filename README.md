@@ -1,4 +1,4 @@
-﻿# BASS Player
+﻿# BASS PlAIer
 
 A minimal native Windows player in C built on **BASS**, **BASS_FX** and **BASSenc**.
 Status is shown in a real `SysListView32`, and everything is controlled from the keyboard.
@@ -49,7 +49,7 @@ You need to fetch the BASS libraries yourself from un4seen (free for non-commerc
 2. Place in the same folder as `player.c`:
    - Headers: `bass.h`, `bass_fx.h`, `bassenc.h`
    - Import libs: `bass.lib`, `bass_fx.lib`, `bassenc.lib`
-   - The DLLs next to `BASSPlayer.exe`: `bass.dll`, `bass_fx.dll`, `bassenc.dll`
+   - The DLLs next to `BASSPlAIer.exe`: `bass.dll`, `bass_fx.dll`, `bassenc.dll`
 3. (Optional) Create the `plugins\` folder and put extra BASS add-on DLLs there.
 4. Build with MSVC (from a Developer Command Prompt):
 
@@ -60,7 +60,7 @@ build.bat
 which runs:
 
 ```
-cl /O2 player.c /link bass.lib bass_fx.lib bassenc.lib comctl32.lib comdlg32.lib user32.lib gdi32.lib /OUT:BASSPlayer.exe
+cl /O2 player.c /link bass.lib bass_fx.lib bassenc.lib comctl32.lib comdlg32.lib user32.lib gdi32.lib /OUT:BASSPlAIer.exe
 ```
 
 ## Notes

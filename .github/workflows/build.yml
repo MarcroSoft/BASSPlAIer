@@ -71,7 +71,7 @@ jobs:
           <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>BASS Player</title>
+          <title>BASS PlAIer</title>
           <style>
             body { font-family: system-ui, sans-serif; line-height: 1.6;
                    max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
@@ -94,11 +94,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release | Out-Null
-          Copy-Item BASSPlayer.exe, bass.dll, bass_fx.dll, bassenc.dll, README.html -Destination release\
+          Copy-Item BASSPlAIer.exe, bass.dll, bass_fx.dll, bassenc.dll, README.html -Destination release\
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $zip = "BASSPlayer-$env:GITHUB_REF_NAME-x64.zip"
+            $zip = "BASSPlAIer-$env:GITHUB_REF_NAME-x64.zip"
           } else {
-            $zip = "BASSPlayer-x64.zip"
+            $zip = "BASSPlAIer-x64.zip"
           }
           Compress-Archive -Path release\* -DestinationPath $zip
           "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -106,7 +106,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BASSPlayer-x64
+          name: BASSPlAIer-x64
           path: ${{ env.ZIP_NAME }}
 
       # --- Rolling "latest" prerelease on every push to main ---

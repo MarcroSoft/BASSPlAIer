@@ -28,7 +28,7 @@
 #include "bass_fx.h"
 #include "bassenc.h"
 
-#define APP_TITLE   "BASS Player"
+#define APP_TITLE   "BASS PlAIer"
 #define ID_LISTVIEW 1001
 #define ID_TIMER    1
 #define ID_HOTKEY_PAUSE 1
@@ -625,10 +625,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show)
     wc.hInstance     = hInst;
     wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName = "BassPlayerWnd";
+    wc.lpszClassName = "BassPlAIerWnd";
     RegisterClass(&wc);
 
-    HWND hwnd = CreateWindow("BassPlayerWnd", APP_TITLE,
+    HWND hwnd = CreateWindow("BassPlAIerWnd", APP_TITLE,
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 540,
         NULL, NULL, hInst, NULL);
     ShowWindow(hwnd, show);
