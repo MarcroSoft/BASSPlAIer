@@ -32,12 +32,13 @@ Please Note: Virtually all of this code is written by AI, so there might be some
 | `Ctrl+V` | Reset volume (100 %) |
 | `1`…`9`, `0` | Cut EQ band 1 dB (`1` = 80 Hz … `0` = 14 kHz); top row or numpad |
 | `Shift`+`1`…`9`, `0` | Boost that EQ band 1 dB (range ±15 dB) |
+| `Ctrl`+`1`…`9`, `0` | Reset that EQ band to 0 dB |
 | `Ctrl+I` | Reset all EQ bands to flat |
 | `R` | Start recording |
 | `E` | Stop recording |
 | `Esc` | Quit |
 
-> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells — bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it — just like the volume keys. `Ctrl+I` flattens everything. The setting persists when you open another file.
+> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells — bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it — just like the volume keys. `Ctrl`+the number resets that single band, and `Ctrl+I` flattens everything. The setting persists when you open another file.
 
 > The list (`SysListView32`) is subclassed and gets focus automatically. Keys it doesn't use itself (e.g. arrow up/down) are passed on, so you can freely navigate the list.
 

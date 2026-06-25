@@ -15,6 +15,7 @@
  *   E           Stop recording
  *   1..9, 0          Cut EQ band 1 dB (1 = 80 Hz .. 0 = 14 kHz)  [10-band EQ]
  *   Shift+1..9, 0    Boost that EQ band 1 dB
+ *   Ctrl+1..9, 0     Reset that EQ band to 0 dB
  *   Ctrl+I           Reset all EQ bands to flat
  *   Esc         Quit
  *
@@ -196,16 +197,6 @@ static void setupEq(void)
         eq.fGain   = g_eqGain[b];  /* reapply any previously chosen gains */
         BASS_FXSetParameters(g_eqFx, &eq);
     }
-}
-
-/* highlight the row holding a band so it is clear which one just changed */
-static void selectEqBand(int band)
-{
-    if (band < 0 || band >= EQ_BANDS) return;
-    int row = ROW_EQ_LO + band / EQ_PER_ROW;
-    ListView_SetItemState(g_hList, row,
-        LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-    ListView_EnsureVisible(g_hList, row, FALSE);
 }
 
 static void changeEqBand(int band, float delta)
@@ -533,15 +524,18 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
     BOOL used  = TRUE;
 
     /* number keys drive the EQ directly, like the volume keys: the plain
-     * number cuts its band, Shift+number boosts it. 1..9 -> bands 1..9,
-     * 0 -> the last band (16 kHz). Top row and numpad both work. */
-    if (!ctrl && ((key >= '0' && key <= '9') ||
-                  (key >= VK_NUMPAD0 && key <= VK_NUMPAD9))) {
+     * number cuts its band, Shift+number boosts it, Ctrl+number resets it
+     * to 0 dB. 1..9 -> bands 1..9, 0 -> the last band (14 kHz). Top row
+     * and numpad both work. */
+    if ((key >= '0' && key <= '9') ||
+        (key >= VK_NUMPAD0 && key <= VK_NUMPAD9)) {
         int d = (key >= VK_NUMPAD0) ? (int)(key - VK_NUMPAD0)
                                     : (int)(key - '0');
         int band = (d == 0) ? EQ_BANDS - 1 : d - 1;
-        changeEqBand(band, shift ? +1.0f : -1.0f);
-        selectEqBand(band);          /* highlight the band that changed */
+        if (ctrl)
+            changeEqBand(band, -g_eqGain[band]);   /* delta back to 0 dB */
+        else
+            changeEqBand(band, shift ? +1.0f : -1.0f);
         updateList();
         return TRUE;
     }
