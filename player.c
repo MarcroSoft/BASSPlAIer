@@ -58,7 +58,7 @@ static const float g_eqFreq[EQ_BANDS] = {
 
 /* ---- ListView rows ---- */
 enum {
-    ROW_FILE = 0, ROW_STATUS, ROW_POS, ROW_LEN,
+    ROW_FILE = 0, ROW_STATUS, ROW_POS, ROW_REMAIN, ROW_LEN,
     ROW_TEMPO, ROW_VOL, ROW_REC,
     ROW_EQ_LO,                     /* EQ bands 1-5 on one row, 6-10 on the next */
     ROW_EQ_HI,
@@ -119,6 +119,7 @@ static void buildList(HWND hwnd)
     lvAddRow(ROW_FILE,   "File");
     lvAddRow(ROW_STATUS, "Status");
     lvAddRow(ROW_POS,    "Position");
+    lvAddRow(ROW_REMAIN, "Remaining");
     lvAddRow(ROW_LEN,    "Length");
     lvAddRow(ROW_TEMPO,  "Tempo");
     lvAddRow(ROW_VOL,    "Volume");
@@ -365,9 +366,13 @@ static void updateList(void)
          * (half the time), -50 % = half speed (double the time). */
         double factor = (g_tempo + 100.0) / 100.0;
         if (factor < 0.01) factor = 0.01;        /* guard (tempo is clamped >= -90) */
-        fmtTime(BASS_ChannelBytes2Seconds(g_stream, pos) / factor, t, sizeof(t));
+        double posSec = BASS_ChannelBytes2Seconds(g_stream, pos) / factor;
+        double lenSec = BASS_ChannelBytes2Seconds(g_stream, len) / factor;
+        fmtTime(posSec, t, sizeof(t));
         lvSetText(ROW_POS, t);
-        fmtTime(BASS_ChannelBytes2Seconds(g_stream, len) / factor, t, sizeof(t));
+        fmtTime(lenSec - posSec, t, sizeof(t));   /* time remaining */
+        lvSetText(ROW_REMAIN, t);
+        fmtTime(lenSec, t, sizeof(t));
         lvSetText(ROW_LEN, t);
 
         snprintf(buf, sizeof(buf), "%+.0f %%", g_tempo);
@@ -381,6 +386,7 @@ static void updateList(void)
         lvSetText(ROW_FILE, "(none)");
         lvSetText(ROW_STATUS, "Stopped");
         lvSetText(ROW_POS, "0:00");
+        lvSetText(ROW_REMAIN, "0:00");
         lvSetText(ROW_LEN, "0:00");
         lvSetText(ROW_TEMPO, "+0 %");
         lvSetText(ROW_VOL, "100 %");
@@ -634,7 +640,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show)
     RegisterClass(&wc);
 
     HWND hwnd = CreateWindow("BassPlAIerWnd", APP_TITLE,
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 340,
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 365,
         NULL, NULL, hInst, NULL);
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
