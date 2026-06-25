@@ -412,7 +412,7 @@ static void updateList(void)
             else
                 snprintf(cell, sizeof(cell), "%g:%+.0f",
                          (double)g_eqFreq[b], g_eqGain[b]);
-            if (i) strncat(line, "   ", sizeof(line) - strlen(line) - 1);
+            if (i) strncat(line, ",   ", sizeof(line) - strlen(line) - 1);
             strncat(line, cell, sizeof(line) - strlen(line) - 1);
         }
         lvSetText(ROW_EQ_LO + r, line);
