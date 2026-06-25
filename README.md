@@ -38,7 +38,7 @@ Please Note: Virtually all of this code is written by AI, so there might be some
 | `E` | Stop recording |
 | `Esc` | Quit |
 
-> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells — bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it — just like the volume keys. `Ctrl`+the number resets that single band, and `Ctrl+I` flattens everything. The setting persists when you open another file.
+> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells — bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it — just like the volume keys. `Ctrl`+the number resets that single band, and `Ctrl+I` flattens everything. The setting persists when you open another file. The two EQ rows are only shown while at least one band is non-zero, and the `Tempo` row only while the tempo isn't 0 %.
 
 > The list (`SysListView32`) is subclassed and gets focus automatically. Keys it doesn't use itself (e.g. arrow up/down) are passed on, so you can freely navigate the list.
 

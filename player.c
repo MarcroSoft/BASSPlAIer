@@ -65,6 +65,16 @@ enum {
     ROW_COUNT
 };
 
+/* column-0 label for each logical row */
+static const char *g_rowName[ROW_COUNT] = {
+    "File:", "Status:", "Position:", "Remaining:", "Length:",
+    "Tempo:", "Volume:", "Recording:", "Equalizer 1:", "Equalizer 2:"
+};
+/* current listview index of each logical row, or -1 while hidden */
+static int  g_rowIdx[ROW_COUNT];
+static BOOL g_showTempo = FALSE;   /* Tempo row hidden while tempo == 0 % */
+static BOOL g_showEq    = FALSE;   /* EQ rows hidden while every band == 0 dB */
+
 static BOOL handleKey(HWND hwnd, WPARAM key);   /* forward */
 
 /* Subclass: the list sends keys to our handler first.
@@ -86,18 +96,31 @@ static LRESULT CALLBACK ListProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 static void lvSetText(int row, const char *txt)
 {
-    ListView_SetItemText(g_hList, row, 1, (LPSTR)txt);
+    if (g_rowIdx[row] >= 0)
+        ListView_SetItemText(g_hList, g_rowIdx[row], 1, (LPSTR)txt);
 }
 
-static void lvAddRow(int row, const char *name)
+/* (re)insert the visible rows; the Tempo and EQ rows can be hidden.
+ * Only called when the visible set actually changes, not every tick. */
+static void rebuildRows(void)
 {
-    LVITEM it = {0};
-    it.mask = LVIF_TEXT;
-    it.iItem = row;
-    it.iSubItem = 0;
-    it.pszText = (LPSTR)name;
-    ListView_InsertItem(g_hList, &it);
-    ListView_SetItemText(g_hList, row, 1, (LPSTR)"");
+    ListView_DeleteAllItems(g_hList);
+    for (int r = 0; r < ROW_COUNT; r++) g_rowIdx[r] = -1;
+
+    int idx = 0;
+    for (int r = 0; r < ROW_COUNT; r++) {
+        if (r == ROW_TEMPO && !g_showTempo) continue;
+        if ((r == ROW_EQ_LO || r == ROW_EQ_HI) && !g_showEq) continue;
+        LVITEM it = {0};
+        it.mask = LVIF_TEXT;
+        it.iItem = idx;
+        it.iSubItem = 0;
+        it.pszText = (LPSTR)g_rowName[r];
+        ListView_InsertItem(g_hList, &it);
+        ListView_SetItemText(g_hList, idx, 1, (LPSTR)"");
+        g_rowIdx[r] = idx;
+        idx++;
+    }
 }
 
 static void buildList(HWND hwnd)
@@ -116,18 +139,7 @@ static void buildList(HWND hwnd)
     col.cx = 350; col.pszText = (LPSTR)"Value";
     ListView_InsertColumn(g_hList, 1, &col);
 
-    lvAddRow(ROW_FILE,   "File:");
-    lvAddRow(ROW_STATUS, "Status:");
-    lvAddRow(ROW_POS,    "Position:");
-    lvAddRow(ROW_REMAIN, "Remaining:");
-    lvAddRow(ROW_LEN,    "Length:");
-    lvAddRow(ROW_TEMPO,  "Tempo:");
-    lvAddRow(ROW_VOL,    "Volume:");
-    lvAddRow(ROW_REC,    "Recording:");
-
-    /* two EQ rows: bands 1-5 and bands 6-10, each holding 5 "freq:gain" cells */
-    lvAddRow(ROW_EQ_LO, "Equalizer 1:");
-    lvAddRow(ROW_EQ_HI, "Equalizer 2:");
+    rebuildRows();   /* Tempo and EQ rows start hidden (everything is zeroed) */
 
     /* subclass the list so it handles the keyboard itself */
     g_listProc = (WNDPROC)SetWindowLongPtr(g_hList, GWLP_WNDPROC, (LONG_PTR)ListProc);
@@ -228,6 +240,14 @@ static void resetEq(void)
             BASS_FXSetParameters(g_eqFx, &eq);
         }
     }
+}
+
+/* any EQ band away from 0 dB? (decides whether the EQ rows are shown) */
+static BOOL eqActive(void)
+{
+    for (int b = 0; b < EQ_BANDS; b++)
+        if (g_eqGain[b] != 0.0f) return TRUE;
+    return FALSE;
 }
 
 /* ---- open file and create tempo stream ---- */
@@ -347,6 +367,16 @@ static void startEncode(HWND hwnd)
 static void updateList(void)
 {
     char buf[256];
+
+    /* show the Tempo row only when tempo != 0, and the EQ rows only when
+     * at least one band is boosted/cut. Rebuild only on a real change. */
+    BOOL wantTempo = (g_tempo != 0.0f);
+    BOOL wantEq    = eqActive();
+    if (wantTempo != g_showTempo || wantEq != g_showEq) {
+        g_showTempo = wantTempo;
+        g_showEq    = wantEq;
+        rebuildRows();
+    }
 
     if (g_stream) {
         const char *base = strrchr(g_file, '\\');
