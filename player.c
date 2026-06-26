@@ -21,7 +21,7 @@
  *   Shift+1..9, 0    Boost that EQ band 1 dB
  *   Ctrl+1..9, 0     Reset that EQ band to 0 dB
  *   Ctrl+I           Reset all EQ bands to flat
- *   Esc         Quit
+ *   Alt+F4         Quit
  *
  * Build with MinGW-w64 (see Makefile / build.bat).
  */
@@ -739,7 +739,6 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
     case 'R':       startEncode(hwnd); break;
     case 'E':       stopEncode(); break;
     case VK_BACK:   resetTempo(); resetPitch(); resetFreq(); break;  /* reset tempo/pitch/freq */
-//    case VK_ESCAPE: DestroyWindow(hwnd); break;
     default:        used = FALSE; break;   /* arrow up/down etc. -> list */
     }
     if (used) updateList();
