@@ -608,7 +608,7 @@ static BOOL inputBox(HWND parent, const char *prompt, char *out, int outlen)
     g_inDone = g_inOk = FALSE; g_inText[0] = 0;
 
     RECT pr; GetWindowRect(parent, &pr);
-    HWND dlg = CreateWindowEx(WS_EX_DLGMODALFRAME, "InputBox", "Input",
+    HWND dlg = CreateWindowEx(WS_EX_DLGMODALFRAME, "InputBox", "Enter command:",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         pr.left + 50, pr.top + 60, 300, 150, parent, NULL, hi, NULL);
 
