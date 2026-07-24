@@ -93,6 +93,17 @@ jobs:
         with:
           arch: x64
 
+      - name: Determine version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            # no leading zeros: 08/09 would be invalid octal in FILEVERSION
+            $ver = Get-Date -Format 'yyyy.M.d'
+          }
+          "APPVERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build
         shell: cmd
         run: build.bat
@@ -145,12 +156,10 @@ jobs:
           choco install nsis --no-progress -y
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $out = "BASSPlAIer-$env:GITHUB_REF_NAME-Setup.exe"
-            $ver = $env:GITHUB_REF_NAME.TrimStart('v')
           } else {
             $out = "BASSPlAIer-Setup.exe"
-            $ver = Get-Date -Format 'yyyy.MM.dd'
           }
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$ver" "/DOUTFILE=$out" installer.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" installer.nsi
           "SETUP_NAME=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload build artifact

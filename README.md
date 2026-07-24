@@ -74,11 +74,15 @@ You need to fetch the BASS libraries yourself from un4seen (free for non-commerc
 build.bat
 ```
 
-which runs:
+which compiles the version resource and the player:
 
 ```
-cl /O2 player.c /link bass.lib bass_fx.lib bassenc.lib comctl32.lib comdlg32.lib user32.lib gdi32.lib /OUT:BASSPlAIer.exe
+rc /nologo /d APP_VERSION=... /d APP_VERSION_NUM=... version.rc
+cl /O2 player.c version.res /link bass.lib bass_fx.lib bassenc.lib comctl32.lib comdlg32.lib user32.lib gdi32.lib /OUT:BASSPlAIer.exe
 ```
+
+The version is taken from the `APPVERSION` environment variable (dotted, e.g. `1.2.3`;
+defaults to `0.0.0`) and is embedded as the exe's product name / version info.
 
 ## Notes
 
