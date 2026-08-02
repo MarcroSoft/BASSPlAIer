@@ -8,6 +8,7 @@
  *
  * Keyboard:
  *   O           Open file(s) (added to the playlist)
+ *   Tab         Switch between the playlist and the status list
  *   Space       Play / Pause
  *   Enter       Play from the start
  *   Pause/Break Play / Pause (global hotkey, works even without focus)
@@ -119,6 +120,10 @@ static void plRemove(int idx);                  /* forward (used by PlistProc) *
 static LRESULT CALLBACK ListProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_KEYDOWN) {
+        if (wp == VK_TAB) {           /* Tab: jump to the playlist pane */
+            SetFocus(g_hPlist);
+            return 0;
+        }
         if (handleKey(GetParent(hwnd), wp))
             return 0;                 /* used -> swallow the key */
         /* otherwise: fall through to the list (navigation) */
@@ -143,6 +148,10 @@ static LRESULT CALLBACK ListProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 static LRESULT CALLBACK PlistProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_KEYDOWN) {
+        if (wp == VK_TAB) {           /* Tab: jump to the status pane */
+            SetFocus(g_hList);
+            return 0;
+        }
         if (wp == VK_RETURN) {
             int sel = ListView_GetNextItem(hwnd, -1, LVNI_SELECTED);
             if (sel >= 0) plPlay(GetParent(hwnd), sel);

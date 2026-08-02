@@ -29,6 +29,7 @@ Please Note: Virtually all of this code is written by AI, so there might be some
 | Key | Action |
 |------|----------|
 | `O` | Open file(s) — added to the playlist |
+| `Tab` | Switch between the playlist and the status list |
 | `Space` | Play / pause |
 | `Enter` | Play from the start (in the playlist: play the selected track) |
 | `Delete` | Remove the selected track (in the playlist) |
