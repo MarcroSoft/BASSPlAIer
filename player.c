@@ -2,8 +2,12 @@
  * Minimal BASS player with tempo (BASS_FX), recording (BASSenc),
  * plugin loading and status display in a SysListView32.
  *
+ * A playlist fills the left pane; opened files (dialog, command line,
+ * drag & drop from Explorer) are queued there and played in order.
+ * Double-click or Enter plays the selected entry, Delete removes it.
+ *
  * Keyboard:
- *   O           Open file
+ *   O           Open file(s) (added to the playlist)
  *   Space       Play / Pause
  *   Enter       Play from the start
  *   Pause/Break Play / Pause (global hotkey, works even without focus)
@@ -29,21 +33,29 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "bass.h"
 #include "bass_fx.h"
 #include "bassenc.h"
 
 #define APP_TITLE   "BASS PlAIer"
 #define ID_LISTVIEW 1001
+#define ID_PLAYLIST 1002
 #define ID_TIMER    1
 #define ID_HOTKEY_PAUSE 1
 #define PLUGIN_DIR  "plugins"
+#define PLAYLIST_W  200                /* width of the playlist pane (px) */
+#define WM_APP_TRACKEND (WM_APP + 1)   /* posted when the playing track ends */
 
 /* ---- global state ---- */
-static HWND      g_hList   = NULL;     /* SysListView32 */
+static HWND      g_hMain   = NULL;     /* main window */
+static HWND      g_hList   = NULL;     /* SysListView32 (status) */
 static WNDPROC   g_listProc = NULL;    /* original listview procedure */
+static HWND      g_hPlist  = NULL;     /* SysListView32 (playlist) */
+static WNDPROC   g_plistProc = NULL;   /* original playlist procedure */
 static DWORD     g_stream  = 0;        /* tempo stream (what we play) */
 static DWORD     g_revStream = 0;      /* reverse decoder (direction control) */
 static BOOL      g_reverse = FALSE;    /* playing backwards continuously? */
@@ -57,6 +69,12 @@ static float     g_freqDef = 0.0f;     /* file's native sample rate (for reset) 
 static BOOL      g_rec     = FALSE;    /* recording right now? */
 static char      g_file[MAX_PATH] = "";
 static char      g_recFile[MAX_PATH] = "";  /* current recording filename */
+
+/* ---- playlist ---- */
+static char    (*g_plFiles)[MAX_PATH] = NULL;  /* full paths, grows on demand */
+static int       g_plCount = 0;
+static int       g_plCap   = 0;
+static int       g_plCur   = -1;       /* index of the playing track, or -1 */
 
 /* ---- 10-band peaking equalizer (BASS_FX) ---- */
 #define EQ_BANDS    10
@@ -93,6 +111,8 @@ static BOOL g_showEq    = FALSE;   /* EQ rows hidden while every band == 0 dB */
 static BOOL handleKey(HWND hwnd, WPARAM key);   /* forward */
 static void cueStop(void);                      /* forward (used by ListProc) */
 static void updateList(void);                   /* forward (used by ListProc) */
+static void plPlay(HWND hwnd, int idx);         /* forward (used by PlistProc) */
+static void plRemove(int idx);                  /* forward (used by PlistProc) */
 
 /* Subclass: the list sends keys to our handler first.
  * Keys we don't use (e.g. arrow up/down) pass through to the list itself. */
@@ -113,7 +133,46 @@ static LRESULT CALLBACK ListProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
      * navigation uses WM_KEYDOWN, so it is unaffected. */
     if (msg == WM_CHAR)
         return 0;
+    if (msg == WM_DROPFILES)          /* dropped on the list -> main window */
+        return SendMessage(GetParent(hwnd), WM_DROPFILES, wp, lp);
     return CallWindowProc(g_listProc, hwnd, msg, wp, lp);
+}
+
+/* Subclass for the playlist: Enter plays the selected track, Delete removes
+ * it; everything else behaves like the status list (global hotkeys work). */
+static LRESULT CALLBACK PlistProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_KEYDOWN) {
+        if (wp == VK_RETURN) {
+            int sel = ListView_GetNextItem(hwnd, -1, LVNI_SELECTED);
+            if (sel >= 0) plPlay(GetParent(hwnd), sel);
+            return 0;
+        }
+        if (wp == VK_DELETE) {
+            int sel = ListView_GetNextItem(hwnd, -1, LVNI_SELECTED);
+            if (sel >= 0) {
+                plRemove(sel);
+                int count = ListView_GetItemCount(hwnd);
+                if (sel >= count) sel = count - 1;   /* keep a row selected */
+                if (sel >= 0)
+                    ListView_SetItemState(hwnd, sel,
+                        LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+            }
+            return 0;
+        }
+        if (handleKey(GetParent(hwnd), wp))
+            return 0;                 /* used -> swallow the key */
+    }
+    if (msg == WM_KEYUP && (wp == VK_F11 || wp == VK_F12)) {
+        cueStop();
+        updateList();
+        return 0;
+    }
+    if (msg == WM_CHAR)
+        return 0;
+    if (msg == WM_DROPFILES)
+        return SendMessage(GetParent(hwnd), WM_DROPFILES, wp, lp);
+    return CallWindowProc(g_plistProc, hwnd, msg, wp, lp);
 }
 
 static void lvSetText(int row, const char *txt)
@@ -171,15 +230,28 @@ static void rebuildRows(void)
 
 static void buildList(HWND hwnd)
 {
-    g_hList = CreateWindowEx(0, WC_LISTVIEW, "",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER,
-        0, 0, 480, 220, hwnd, (HMENU)ID_LISTVIEW,
+    /* playlist pane on the left */
+    g_hPlist = CreateWindowEx(0, WC_LISTVIEW, "",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER |
+        LVS_SHOWSELALWAYS,
+        0, 0, PLAYLIST_W, 220, hwnd, (HMENU)ID_PLAYLIST,
         GetModuleHandle(NULL), NULL);
-    ListView_SetExtendedListViewStyle(g_hList,
+    ListView_SetExtendedListViewStyle(g_hPlist,
         LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
     LVCOLUMN col = {0};
     col.mask = LVCF_TEXT | LVCF_WIDTH;
+    col.cx = PLAYLIST_W - 24; col.pszText = (LPSTR)"Playlist";
+    ListView_InsertColumn(g_hPlist, 0, &col);
+
+    /* status pane on the right */
+    g_hList = CreateWindowEx(0, WC_LISTVIEW, "",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER,
+        PLAYLIST_W, 0, 480, 220, hwnd, (HMENU)ID_LISTVIEW,
+        GetModuleHandle(NULL), NULL);
+    ListView_SetExtendedListViewStyle(g_hList,
+        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
     col.cx = 130; col.pszText = (LPSTR)"Property";
     ListView_InsertColumn(g_hList, 0, &col);
     col.cx = 350; col.pszText = (LPSTR)"Value";
@@ -187,8 +259,13 @@ static void buildList(HWND hwnd)
 
     rebuildRows();   /* Tempo and EQ rows start hidden (everything is zeroed) */
 
-    /* subclass the list so it handles the keyboard itself */
-    g_listProc = (WNDPROC)SetWindowLongPtr(g_hList, GWLP_WNDPROC, (LONG_PTR)ListProc);
+    /* subclass both lists so they handle the keyboard themselves */
+    g_listProc  = (WNDPROC)SetWindowLongPtr(g_hList,  GWLP_WNDPROC, (LONG_PTR)ListProc);
+    g_plistProc = (WNDPROC)SetWindowLongPtr(g_hPlist, GWLP_WNDPROC, (LONG_PTR)PlistProc);
+    /* accept files dropped from Explorer on any part of the window */
+    DragAcceptFiles(hwnd, TRUE);
+    DragAcceptFiles(g_hList, TRUE);
+    DragAcceptFiles(g_hPlist, TRUE);
     SetFocus(g_hList);
 }
 
@@ -301,19 +378,64 @@ static BOOL eqActive(void)
     return FALSE;
 }
 
-/* ---- open file and create tempo stream ---- */
-static void openFile(HWND hwnd)
+/* ---- playlist handling ---- */
+static const char *plBase(int idx)     /* filename without the directory */
 {
-    char path[MAX_PATH] = "";
-    OPENFILENAME ofn = {0};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = "Audio files\0*.mp3;*.ogg;*.wav;*.flac;*.aac;*.m4a;*.opus\0All files\0*.*\0";
-    ofn.lpstrFile = path;
-    ofn.nMaxFile = sizeof(path);
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    if (!GetOpenFileName(&ofn)) return;
+    const char *base = strrchr(g_plFiles[idx], '\\');
+    return base ? base + 1 : g_plFiles[idx];
+}
 
+/* row text: the playing track is marked with "> " */
+static void plSetRowText(int idx)
+{
+    char buf[MAX_PATH + 4];
+    snprintf(buf, sizeof(buf), "%s%s",
+             idx == g_plCur ? "> " : "", plBase(idx));
+    ListView_SetItemText(g_hPlist, idx, 0, buf);
+}
+
+/* append a file to the playlist; returns its index or -1 */
+static int plAdd(const char *path)
+{
+    if (g_plCount == g_plCap) {
+        int newCap = g_plCap ? g_plCap * 2 : 32;
+        void *p = realloc(g_plFiles, newCap * sizeof(*g_plFiles));
+        if (!p) return -1;
+        g_plFiles = p;
+        g_plCap = newCap;
+    }
+    lstrcpyn(g_plFiles[g_plCount], path, MAX_PATH);
+
+    LVITEM it = {0};
+    it.mask = LVIF_TEXT;
+    it.iItem = g_plCount;
+    it.pszText = (LPSTR)plBase(g_plCount);
+    ListView_InsertItem(g_hPlist, &it);
+    return g_plCount++;
+}
+
+static void plRemove(int idx)
+{
+    if (idx < 0 || idx >= g_plCount) return;
+    memmove(g_plFiles[idx], g_plFiles[idx + 1],
+            (size_t)(g_plCount - idx - 1) * sizeof(*g_plFiles));
+    g_plCount--;
+    ListView_DeleteItem(g_hPlist, idx);
+    if (g_plCur == idx)      g_plCur = -1;  /* playing row removed: keep playing,
+                                             * but auto-advance stops */
+    else if (g_plCur > idx)  g_plCur--;
+}
+
+/* the playing track reached its end (posted from the BASS sync thread) */
+static void CALLBACK onTrackEnd(HSYNC handle, DWORD channel, DWORD data, void *user)
+{
+    (void)handle; (void)channel; (void)data; (void)user;
+    PostMessage(g_hMain, WM_APP_TRACKEND, 0, 0);
+}
+
+/* ---- open file and create tempo stream ---- */
+static BOOL playFile(HWND hwnd, const char *path)
+{
     closeStream();
 
     /* chain: file decoder -> reverse decoder -> tempo wrapper.
@@ -322,21 +444,21 @@ static void openFile(HWND hwnd)
         BASS_STREAM_DECODE | BASS_SAMPLE_FLOAT);
     if (!dec) {
         MessageBox(hwnd, "Could not open the file.", APP_TITLE, MB_ICONERROR);
-        return;
+        return FALSE;
     }
     g_revStream = BASS_FX_ReverseCreate(dec, 2.0f,
         BASS_STREAM_DECODE | BASS_FX_FREESOURCE);
     if (!g_revStream) {
         BASS_StreamFree(dec);
         MessageBox(hwnd, "Could not create reverse stream.", APP_TITLE, MB_ICONERROR);
-        return;
+        return FALSE;
     }
     g_stream = BASS_FX_TempoCreate(g_revStream, BASS_FX_FREESOURCE);
     if (!g_stream) {
         BASS_StreamFree(g_revStream);
         g_revStream = 0;
         MessageBox(hwnd, "Could not create tempo stream.", APP_TITLE, MB_ICONERROR);
-        return;
+        return FALSE;
     }
 
     lstrcpyn(g_file, path, MAX_PATH);
@@ -357,7 +479,55 @@ static void openFile(HWND hwnd)
     }
     g_freqDef = g_freq;
     setupEq();                 /* 10-band EQ (reapplies current gains) */
+    /* advance to the next playlist track when this one ends */
+    BASS_ChannelSetSync(g_stream, BASS_SYNC_END, 0, onTrackEnd, NULL);
     BASS_ChannelPlay(g_stream, FALSE);
+    return TRUE;
+}
+
+/* play playlist entry idx and mark it as the current track */
+static void plPlay(HWND hwnd, int idx)
+{
+    if (idx < 0 || idx >= g_plCount) return;
+    if (!playFile(hwnd, g_plFiles[idx])) return;
+    int old = g_plCur;
+    g_plCur = idx;
+    if (old >= 0 && old < g_plCount) plSetRowText(old);   /* clear old marker */
+    plSetRowText(idx);
+    ListView_EnsureVisible(g_hPlist, idx, FALSE);
+    updateList();
+}
+
+/* file dialog: the chosen files are appended to the playlist and the
+ * first of them starts playing */
+static void openFileDialog(HWND hwnd)
+{
+    static char buf[32768];    /* room for many selected files */
+    buf[0] = 0;
+    OPENFILENAME ofn = {0};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = "Audio files\0*.mp3;*.ogg;*.wav;*.flac;*.aac;*.m4a;*.opus\0All files\0*.*\0";
+    ofn.lpstrFile = buf;
+    ofn.nMaxFile = sizeof(buf);
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+                OFN_EXPLORER | OFN_ALLOWMULTISELECT;
+    if (!GetOpenFileName(&ofn)) return;
+
+    int first = -1;
+    if (ofn.nFileOffset > 0 && buf[ofn.nFileOffset - 1] == '\0') {
+        /* multiple files: directory, then a double-null list of names */
+        const char *dir = buf;
+        for (const char *p = buf + lstrlen(buf) + 1; *p; p += lstrlen(p) + 1) {
+            char full[MAX_PATH];
+            snprintf(full, sizeof(full), "%s\\%s", dir, p);
+            int idx = plAdd(full);
+            if (first < 0) first = idx;
+        }
+    } else {
+        first = plAdd(buf);    /* single file: buf is the full path */
+    }
+    if (first >= 0) plPlay(hwnd, first);
 }
 
 /* ---- seek relative ---- */
@@ -740,7 +910,7 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
     }
 
     switch (key) {
-    case 'O':       openFile(hwnd); break;
+    case 'O':       openFileDialog(hwnd); break;
     case VK_SPACE:  togglePlay(); break;
     case VK_RETURN: playFromStart(); break;
     case VK_LEFT:   seekBy(ctrl ? -30.0 : -5.0); break;
@@ -778,13 +948,64 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
     case WM_CREATE:
+        g_hMain = hwnd;
         buildList(hwnd);
         SetTimer(hwnd, ID_TIMER, 200, NULL);
         /* global Pause/Break hotkey: pauses even when we don't have focus */
         RegisterHotKey(hwnd, ID_HOTKEY_PAUSE, 0, VK_PAUSE);
         return 0;
-    case WM_SIZE:
-        MoveWindow(g_hList, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
+    case WM_SIZE: {
+        int w = LOWORD(lp), h = HIWORD(lp);
+        int pw = (w > PLAYLIST_W * 2) ? PLAYLIST_W : w / 2;
+        MoveWindow(g_hPlist, 0, 0, pw, h, TRUE);
+        MoveWindow(g_hList, pw, 0, w - pw, h, TRUE);
+        return 0;
+    }
+    case WM_NOTIFY: {
+        NMHDR *nm = (NMHDR *)lp;
+        if (nm->hwndFrom == g_hPlist && nm->code == NM_DBLCLK) {
+            int sel = ((NMITEMACTIVATE *)lp)->iItem;
+            if (sel >= 0) plPlay(hwnd, sel);
+        }
+        return 0;
+    }
+    case WM_DROPFILES: {
+        /* files dragged in from Explorer: queue all, play the first */
+        HDROP drop = (HDROP)wp;
+        UINT n = DragQueryFile(drop, 0xFFFFFFFF, NULL, 0);
+        int first = -1;
+        for (UINT i = 0; i < n; i++) {
+            char path[MAX_PATH];
+            if (DragQueryFile(drop, i, path, MAX_PATH)) {
+                int idx = plAdd(path);
+                if (first < 0) first = idx;
+            }
+        }
+        DragFinish(drop);
+        if (first >= 0) plPlay(hwnd, first);
+        return 0;
+    }
+    case WM_COPYDATA: {
+        /* a second instance (e.g. Explorer "Open with") hands us a file:
+         * dwData 1 = queue and play, 2 = queue only */
+        COPYDATASTRUCT *cd = (COPYDATASTRUCT *)lp;
+        if (cd && cd->lpData && cd->cbData &&
+            (cd->dwData == 1 || cd->dwData == 2)) {
+            char path[MAX_PATH];
+            lstrcpyn(path, (const char *)cd->lpData, MAX_PATH);
+            int idx = plAdd(path);
+            if (idx >= 0 && cd->dwData == 1) plPlay(hwnd, idx);
+            return TRUE;
+        }
+        return FALSE;
+    }
+    case WM_APP_TRACKEND:
+        /* while cueing backwards the stream can "end" at position 0:
+         * that is not the end of the track, so don't advance */
+        if (!g_cueing && g_plCur >= 0 && g_plCur + 1 < g_plCount)
+            plPlay(hwnd, g_plCur + 1);
+        else
+            updateList();
         return 0;
     case WM_SETFOCUS:
         SetFocus(g_hList);   /* always keep focus on the list */
@@ -815,6 +1036,25 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show)
 {
     (void)prev; (void)cmd;
 
+    /* files on the command line (e.g. opened from Explorer): if the player
+     * is already running, hand them over to that instance instead of
+     * starting a second one. First file plays, the rest are queued. */
+    if (__argc > 1) {
+        HWND other = FindWindow("BassPlAIerWnd", NULL);
+        if (other) {
+            for (int i = 1; i < __argc; i++) {
+                COPYDATASTRUCT cd;
+                cd.dwData = (i == 1) ? 1 : 2;
+                cd.cbData = (DWORD)lstrlen(__argv[i]) + 1;
+                cd.lpData = __argv[i];
+                SendMessage(other, WM_COPYDATA, 0, (LPARAM)&cd);
+            }
+            if (IsIconic(other)) ShowWindow(other, SW_RESTORE);
+            SetForegroundWindow(other);
+            return 0;
+        }
+    }
+
     /* check runtime version of BASS_FX */
     if (HIWORD(BASS_FX_GetVersion()) != BASSVERSION) {
         MessageBox(NULL, "Wrong bass_fx.dll version.", APP_TITLE, MB_ICONERROR);
@@ -844,11 +1084,21 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show)
     RegisterClass(&wc);
 
     HWND hwnd = CreateWindow("BassPlAIerWnd", APP_TITLE,
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 500, 430,
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 700, 430,
         NULL, NULL, hInst, NULL);
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
     SetFocus(hwnd);   /* the main window receives keys, not the list */
+
+    /* queue the command-line files and start playing the first one */
+    if (__argc > 1) {
+        int first = -1;
+        for (int i = 1; i < __argc; i++) {
+            int idx = plAdd(__argv[i]);
+            if (first < 0) first = idx;
+        }
+        if (first >= 0) plPlay(hwnd, first);
+    }
 
     MSG m;
     while (GetMessage(&m, NULL, 0, 0)) {
@@ -858,5 +1108,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show)
 
     BASS_PluginFree(0);
     BASS_Free();
+    free(g_plFiles);
     return (int)m.wParam;
 }

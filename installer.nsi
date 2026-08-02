@@ -17,6 +17,16 @@ Unicode true
 !define PUBLISHER "MarcroSoft"
 !define EXENAME   "BASSPlAIer.exe"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
+!define PROGID    "BASSPlAIer.audio"
+
+; register/unregister one audio extension for "Open with" in Explorer
+!macro RegisterExt EXT
+  WriteRegStr HKLM "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}" ""
+  WriteRegStr HKLM "Software\Classes\Applications\${EXENAME}\SupportedTypes" "${EXT}" ""
+!macroend
+!macro UnregisterExt EXT
+  DeleteRegValue HKLM "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}"
+!macroend
 
 Name "${APPNAME}"
 OutFile "${OUTFILE}"
@@ -65,6 +75,29 @@ Section /o "Desktop shortcut" SEC_DESKTOP
   CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
 SectionEnd
 
+Section "Open audio files from Explorer" SEC_ASSOC
+  ; ProgID describing how to open a file with the player
+  WriteRegStr HKLM "Software\Classes\${PROGID}" "" "Audio file (${APPNAME})"
+  WriteRegStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\${EXENAME},0"
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\${EXENAME}" "%1"'
+
+  ; application registration (shows up in "Open with -> Choose another app")
+  WriteRegStr HKLM "Software\Classes\Applications\${EXENAME}" "FriendlyAppName" "${APPNAME}"
+  WriteRegStr HKLM "Software\Classes\Applications\${EXENAME}\shell\open\command" "" '"$INSTDIR\${EXENAME}" "%1"'
+
+  ; offer the player in Explorer's "Open with" list for the audio formats
+  !insertmacro RegisterExt ".mp3"
+  !insertmacro RegisterExt ".ogg"
+  !insertmacro RegisterExt ".wav"
+  !insertmacro RegisterExt ".flac"
+  !insertmacro RegisterExt ".aac"
+  !insertmacro RegisterExt ".m4a"
+  !insertmacro RegisterExt ".opus"
+
+  ; tell Explorer the associations changed (SHCNE_ASSOCCHANGED)
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+SectionEnd
+
 Section "Uninstall"
   Delete "$INSTDIR\BASSPlAIer.exe"
   Delete "$INSTDIR\bass.dll"
@@ -77,4 +110,16 @@ Section "Uninstall"
   Delete "$DESKTOP\${APPNAME}.lnk"
   DeleteRegKey HKLM "${UNINSTKEY}"
   DeleteRegKey HKLM "Software\${APPNAME}"
+
+  ; remove the file associations again
+  !insertmacro UnregisterExt ".mp3"
+  !insertmacro UnregisterExt ".ogg"
+  !insertmacro UnregisterExt ".wav"
+  !insertmacro UnregisterExt ".flac"
+  !insertmacro UnregisterExt ".aac"
+  !insertmacro UnregisterExt ".m4a"
+  !insertmacro UnregisterExt ".opus"
+  DeleteRegKey HKLM "Software\Classes\${PROGID}"
+  DeleteRegKey HKLM "Software\Classes\Applications\${EXENAME}"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
