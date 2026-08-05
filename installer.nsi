@@ -44,19 +44,18 @@ SetCompressor /SOLID lzma
 !define MUI_ICON   "installer.ico"
 !define MUI_UNICON "installer.ico"
 
-; Strip the icon resources from the installer itself. !packhdr runs the command
-; on the exe stub while it is being built - before the data is appended and the
-; CRC is computed - so unlike editing the finished installer this does not trip
-; the "installer corrupted" check. strip-icons.ps1 deletes both the icon group
-; and the RT_ICON entries it points at, leaving no icon resource at all;
-; Windows then draws its generic exe icon. Both paths are absolute so nothing
-; depends on the working directory makensis happens to run in. CI passes:
-;   makensis /DSTRIPICONS=C:\path\to\strip-icons.ps1 ...
-; Without it the installer simply keeps the single icon from installer.ico.
-!ifdef STRIPICONS
-  !define EXEHEAD_TMP "$%TEMP%\bassplaier-exehead.tmp"
-  !packhdr "${EXEHEAD_TMP}" 'powershell -NoProfile -ExecutionPolicy Bypass -File "${STRIPICONS}" "${EXEHEAD_TMP}"'
-!endif
+; One icon is the floor here - do not try to strip it entirely. Deleting the
+; icon resources from the exe stub via !packhdr does work (it runs before the
+; data is appended and the CRC is computed, so the "corrupted" check stays
+; happy), but makensis then aborts with
+;   Error generating uninstaller icon: invalid icon offset
+; because installer and uninstaller share one stub: at run time the installer
+; writes a copy of its own stub out as Uninstall.exe and patches the
+; uninstaller icon in at offsets makensis derives from the stub's icon
+; resources. With the resources gone there is nothing to patch. Deleting only
+; the icon group (as the NSIS wiki recipe does) fails the same way, since the
+; group is what those offsets come from. Removing WriteUninstaller would be the
+; only way out, which is not worth an icon.
 
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS

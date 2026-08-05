@@ -154,22 +154,18 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis --no-progress -y
-          # !packhdr runs strip-icons.ps1 on the exe stub; pass an absolute path
-          # so it does not matter what directory makensis spawns the command in.
-          $strip = (Resolve-Path strip-icons.ps1).Path
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $out = "BASSPlAIer-$env:GITHUB_REF_NAME-Setup.exe"
           } else {
             $out = "BASSPlAIer-Setup.exe"
           }
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" "/DSTRIPICONS=$strip" installer.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" installer.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
           "SETUP_NAME=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      # The icon stripping happens inside makensis, so assert on the result:
-      # the finished installer must carry no RT_ICON/RT_GROUP_ICON resources,
-      # and must still pass its own CRC check (/NCRC is deliberately not used).
-      - name: Verify the installer has no icon resources
+      # installer.ico must stay a single-image icon: MUI's default carries 7,
+      # and nothing in the build would otherwise notice it creeping back.
+      - name: Verify the installer carries a single icon
         shell: pwsh
         run: |
           Add-Type @"
@@ -195,17 +191,9 @@ jobs:
           $icons  = [Res]::Count((Resolve-Path $env:SETUP_NAME).Path, 3)    # RT_ICON
           $groups = [Res]::Count((Resolve-Path $env:SETUP_NAME).Path, 14)   # RT_GROUP_ICON
           Write-Host "$env:SETUP_NAME -> RT_ICON=$icons RT_GROUP_ICON=$groups"
-          if ($icons -ne 0 -or $groups -ne 0) {
-            throw "Installer still carries icon resources (RT_ICON=$icons, RT_GROUP_ICON=$groups)"
+          if ($icons -ne 1 -or $groups -ne 1) {
+            throw "Expected exactly one icon image (RT_ICON=1, RT_GROUP_ICON=1) but found RT_ICON=$icons, RT_GROUP_ICON=$groups"
           }
-          # NSIS verifies its own CRC on startup; /NCRC would skip exactly the
-          # check we want to prove still passes, so run the real thing.
-          $p = Start-Process -FilePath ".\$env:SETUP_NAME" -ArgumentList "/S","/D=$PWD\crctest" -PassThru
-          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "Installer did not exit within 120 s" }
-          if ($p.ExitCode -ne 0) { throw "Installer exited with code $($p.ExitCode) - CRC check or install failed" }
-          if (-not (Test-Path "$PWD\crctest\BASSPlAIer.exe")) { throw "Silent install produced no BASSPlAIer.exe" }
-          Write-Host "Installer ran, passed its CRC check and installed correctly."
-          Remove-Item "$PWD\crctest" -Recurse -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
