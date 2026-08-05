@@ -39,8 +39,8 @@ SetCompressor /SOLID lzma
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
 
 ; MUI's default icon carries 7 images, i.e. 7 RT_ICON resources. installer.ico
-; holds a single 32x32 image, so the uninstaller (which !packhdr below cannot
-; reach) ends up with one icon resource instead of seven.
+; holds a single 32x32 16-colour image (744 bytes as a resource), so the
+; installer and the uninstaller carry one icon resource each instead of seven.
 !define MUI_ICON   "installer.ico"
 !define MUI_UNICON "installer.ico"
 
