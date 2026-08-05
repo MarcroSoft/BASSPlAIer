@@ -75,7 +75,7 @@ Section /o "Desktop shortcut" SEC_DESKTOP
   CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
 SectionEnd
 
-Section "Open audio files from Explorer" SEC_ASSOC
+Section "Associate audio files with BASSPlAIer" SEC_ASSOC
   ; ProgID describing how to open a file with the player
   WriteRegStr HKLM "Software\Classes\${PROGID}" "" "Audio file (${APPNAME})"
   WriteRegStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\${EXENAME},0"
