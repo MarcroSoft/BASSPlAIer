@@ -16,7 +16,7 @@ Please Note: Virtually all of this code is written by AI, so there might be some
   on the command line, or opened via **Open with → BASS PlAIer** (the installer
   registers the formats). If the player is already running, the file is handed
   to the running instance instead of starting a new one.
-- Playback via BASS with plugin loading (all `.dll` files in the `plugins\` folder are loaded with `BASS_PluginLoad`, e.g. `bassflac.dll`, `bassopus.dll`, `bass_aac.dll`).
+- Playback via BASS with plugin loading (all `.dll` files in the `plugins\` folder **next to the exe** are loaded with `BASS_PluginLoad`, e.g. `bassflac.dll`, `bassopus.dll`, `bass_aac.dll`).
 - Real-time tempo change with BASS_FX (`BASS_ATTRIB_TEMPO`) — without changing the pitch.
 - Reverse playback (`BASS_FX_ReverseCreate`) and tape-recorder-style fast cue/review: hold `F11`/`F12` to scrub backward/forward at speed.
 - Independent pitch shift in semitones (`BASS_ATTRIB_TEMPO_PITCH`) and playback sample-rate / frequency control in 100 Hz steps (`BASS_ATTRIB_TEMPO_FREQ`).
@@ -66,10 +66,13 @@ Please Note: Virtually all of this code is written by AI, so there might be some
 ## Download
 
 Prebuilt x64 packages are attached to each [GitHub release](../../releases): a portable
-`.zip` and a Windows installer (`BASSPlAIer-Setup.exe`, built with NSIS) that adds a
-Start-menu shortcut, an optional desktop shortcut and an uninstaller, and registers the
-audio formats so they can be opened from Explorer's **Open with** menu. The BASS DLLs
-are bundled in.
+`.zip` and a Windows installer (`BASSPlAIer-Setup.exe`, built with NSIS) that adds
+Start-menu and desktop shortcuts and an uninstaller, and registers the audio formats so
+they can be opened from Explorer's **Open with** menu. The BASS DLLs are bundled in.
+
+Format plugins for Opus, FLAC, AAC, Apple Lossless, WavPack, Monkey's Audio and DSD are
+offered on the installer's components page — none are ticked by default, so pick the ones
+you want. The portable `.zip` simply ships them all in its `plugins\` folder.
 
 ## How to build
 

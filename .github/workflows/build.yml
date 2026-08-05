@@ -88,6 +88,38 @@ jobs:
           Copy-Item bassenc\c\x64\bassenc.lib  -Destination .
           Copy-Item bassenc\x64\bassenc.dll    -Destination .
 
+      # Optional format plugins offered by the installer. Only the x64 DLL is
+      # needed - they are loaded at run time with BASS_PluginLoad, so there is
+      # nothing to link against.
+      - name: Download BASS plugins
+        shell: pwsh
+        run: |
+          $plugins = @(
+            @{ name = "bassopus"; url = "https://www.un4seen.com/files/bassopus24.zip" },
+            @{ name = "bassflac"; url = "https://www.un4seen.com/files/bassflac24.zip" },
+            @{ name = "bassalac"; url = "https://www.un4seen.com/files/bassalac24.zip" },
+            @{ name = "basswv";   url = "https://www.un4seen.com/files/basswv24.zip" },
+            @{ name = "bassape";  url = "https://www.un4seen.com/files/bassape24.zip" },
+            @{ name = "bassdsd";  url = "https://www.un4seen.com/files/bassdsd24.zip" },
+            @{ name = "bass_aac"; url = "https://www.un4seen.com/files/z/2/bass_aac24.zip" }
+          )
+          New-Item -ItemType Directory -Path plugins | Out-Null
+          foreach ($p in $plugins) {
+            $dir = "plugin_$($p.name)"
+            Invoke-WebRequest -Uri $p.url -OutFile "$dir.zip" -UserAgent "Mozilla/5.0"
+            Expand-Archive -Path "$dir.zip" -DestinationPath $dir -Force
+            # locate the 64-bit build rather than assuming the layout of each zip
+            $dll = Get-ChildItem -Path $dir -Recurse -Filter "$($p.name).dll" |
+                   Where-Object { $_.DirectoryName -match '\\x64$' } |
+                   Select-Object -First 1
+            if (-not $dll) {
+              Get-ChildItem -Path $dir -Recurse -Filter *.dll | ForEach-Object { Write-Host "  found: $($_.FullName)" }
+              throw "no x64 $($p.name).dll in $($p.url) - see the .dll list above"
+            }
+            Copy-Item $dll.FullName -Destination plugins\
+          }
+          Get-ChildItem plugins | Select-Object Name, Length | Format-Table -AutoSize
+
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -142,6 +174,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path release | Out-Null
           Copy-Item BASSPlAIer.exe, bass.dll, bass_fx.dll, bassenc.dll, README.html -Destination release\
+          # the zip gets every plugin; the installer offers them one by one
+          Copy-Item plugins -Destination release\ -Recurse
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $zip = "BASSPlAIer-$env:GITHUB_REF_NAME-x64.zip"
           } else {

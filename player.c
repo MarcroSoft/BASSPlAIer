@@ -285,17 +285,27 @@ static void buildList(HWND hwnd)
     SetFocus(g_hPlist);
 }
 
-/* ---- plugin loading: all .dll in ./plugins ---- */
+/* ---- plugin loading: all .dll in the plugins folder next to the exe ----
+ * The folder is resolved against the exe, not the working directory: opening
+ * a file from Explorer starts us in the folder of that file, and a relative
+ * path would then find no plugins at all. */
 static void loadPlugins(void)
 {
+    char dir[MAX_PATH];
+    DWORD n = GetModuleFileName(NULL, dir, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return;
+    char *slash = strrchr(dir, '\\');
+    if (!slash) return;
+    *slash = 0;                     /* strip the exe name */
+
     WIN32_FIND_DATA fd;
     char pattern[MAX_PATH];
-    snprintf(pattern, sizeof(pattern), "%s\\*.dll", PLUGIN_DIR);
+    snprintf(pattern, sizeof(pattern), "%s\\%s\\*.dll", dir, PLUGIN_DIR);
     HANDLE h = FindFirstFile(pattern, &fd);
     if (h == INVALID_HANDLE_VALUE) return;
     do {
         char full[MAX_PATH];
-        snprintf(full, sizeof(full), "%s\\%s", PLUGIN_DIR, fd.cFileName);
+        snprintf(full, sizeof(full), "%s\\%s\\%s", dir, PLUGIN_DIR, fd.cFileName);
         BASS_PluginLoad(full, 0);   /* ignore errors for non-bass dlls */
     } while (FindNextFile(h, &fd));
     FindClose(h);
