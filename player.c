@@ -57,6 +57,7 @@ static HWND      g_hList   = NULL;     /* SysListView32 (status) */
 static WNDPROC   g_listProc = NULL;    /* original listview procedure */
 static HWND      g_hPlist  = NULL;     /* SysListView32 (playlist) */
 static WNDPROC   g_plistProc = NULL;   /* original playlist procedure */
+static HWND      g_hFocus  = NULL;     /* pane that keeps the keyboard focus */
 static DWORD     g_stream  = 0;        /* tempo stream (what we play) */
 static DWORD     g_revStream = 0;      /* reverse decoder (direction control) */
 static BOOL      g_reverse = FALSE;    /* playing backwards continuously? */
@@ -140,6 +141,8 @@ static LRESULT CALLBACK ListProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     if (msg == WM_DROPFILES)          /* dropped on the list -> main window */
         return SendMessage(GetParent(hwnd), WM_DROPFILES, wp, lp);
+    if (msg == WM_SETFOCUS)
+        g_hFocus = hwnd;              /* remember which pane the user is in */
     return CallWindowProc(g_listProc, hwnd, msg, wp, lp);
 }
 
@@ -181,6 +184,8 @@ static LRESULT CALLBACK PlistProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     if (msg == WM_DROPFILES)
         return SendMessage(GetParent(hwnd), WM_DROPFILES, wp, lp);
+    if (msg == WM_SETFOCUS)
+        g_hFocus = hwnd;              /* remember which pane the user is in */
     return CallWindowProc(g_plistProc, hwnd, msg, wp, lp);
 }
 
@@ -275,7 +280,8 @@ static void buildList(HWND hwnd)
     DragAcceptFiles(hwnd, TRUE);
     DragAcceptFiles(g_hList, TRUE);
     DragAcceptFiles(g_hPlist, TRUE);
-    SetFocus(g_hList);
+    g_hFocus = g_hPlist;   /* start in the playlist */
+    SetFocus(g_hPlist);
 }
 
 /* ---- plugin loading: all .dll in ./plugins ---- */
@@ -1017,7 +1023,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             updateList();
         return 0;
     case WM_SETFOCUS:
-        SetFocus(g_hList);   /* always keep focus on the list */
+        /* keep the keyboard on the pane the user last used (playlist at start) */
+        SetFocus(g_hFocus ? g_hFocus : g_hPlist);
         return 0;
     case WM_TIMER:
         updateList();
