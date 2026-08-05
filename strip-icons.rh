@@ -1,0 +1,6 @@
+[FILENAMES]
+Exe=exehead.tmp
+SaveAs=exehead.tmp
+[COMMANDS]
+-delete ICONGROUP,,
+-delete ICON,,

@@ -38,11 +38,23 @@ SetCompressor /SOLID lzma
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
 
-; Our own icon replaces MUI's default one, which carries 7 images (7 RT_ICON
-; resources). installer.ico holds a single 32x32 image, so the installer and
-; the uninstaller end up with one icon resource each.
+; MUI's default icon carries 7 images, i.e. 7 RT_ICON resources. installer.ico
+; holds a single 32x32 image, so the uninstaller (which !packhdr below cannot
+; reach) ends up with one icon resource instead of seven.
 !define MUI_ICON   "installer.ico"
 !define MUI_UNICON "installer.ico"
+
+; Strip the icon resources from the installer itself. !packhdr runs the command
+; on the exe stub while it is being built - before the data is appended and the
+; CRC is computed - so unlike editing the finished installer this does not trip
+; the "installer corrupted" check. strip-icons.rh deletes both the icon group
+; and the RT_ICON entries it points at, leaving no icon resource at all;
+; Windows then draws its generic exe icon. RESHACKER is passed by CI:
+;   makensis /DRESHACKER=C:\path\to\ResourceHacker.exe ...
+; Without it the installer simply keeps the single icon from installer.ico.
+!ifdef RESHACKER
+  !packhdr "exehead.tmp" '"${RESHACKER}" -script strip-icons.rh -log CONSOLE'
+!endif
 
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS

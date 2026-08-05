@@ -153,14 +153,62 @@ jobs:
       - name: Build installer (NSIS)
         shell: pwsh
         run: |
-          choco install nsis --no-progress -y
+          choco install nsis reshack.portable --no-progress -y
+          # !packhdr calls Resource Hacker to strip the icon resources; the
+          # chocolatey shim is not used because shims for GUI apps return
+          # before the tool has finished writing the file.
+          $rh = (Get-ChildItem "C:\ProgramData\chocolatey\lib\reshack.portable" -Filter ResourceHacker.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          if (-not $rh) { throw "ResourceHacker.exe not found after 'choco install reshack.portable'" }
+          Write-Host "Resource Hacker: $rh"
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $out = "BASSPlAIer-$env:GITHUB_REF_NAME-Setup.exe"
           } else {
             $out = "BASSPlAIer-Setup.exe"
           }
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" installer.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" "/DRESHACKER=$rh" installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
           "SETUP_NAME=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # The icon stripping happens inside makensis, so assert on the result:
+      # the finished installer must carry no RT_ICON/RT_GROUP_ICON resources,
+      # and must still pass its own CRC check (/NCRC is deliberately not used).
+      - name: Verify the installer has no icon resources
+        shell: pwsh
+        run: |
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Res {
+              [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+              public static extern IntPtr LoadLibraryEx(string f, IntPtr h, uint flags);
+              [DllImport("kernel32.dll")] public static extern bool FreeLibrary(IntPtr h);
+              public delegate bool Cb(IntPtr m, IntPtr t, IntPtr n, IntPtr p);
+              [DllImport("kernel32.dll", SetLastError=true)]
+              public static extern bool EnumResourceNames(IntPtr m, IntPtr t, Cb cb, IntPtr p);
+              public static int Count(string file, int type) {
+                  int n = 0;
+                  IntPtr h = LoadLibraryEx(file, IntPtr.Zero, 0x00000002);   // AS_DATAFILE
+                  if (h == IntPtr.Zero) throw new Exception("LoadLibraryEx failed on " + file);
+                  try { EnumResourceNames(h, new IntPtr(type), (a,b,c,d) => { n++; return true; }, IntPtr.Zero); }
+                  finally { FreeLibrary(h); }
+                  return n;
+              }
+          }
+          "@
+          $icons  = [Res]::Count((Resolve-Path $env:SETUP_NAME).Path, 3)    # RT_ICON
+          $groups = [Res]::Count((Resolve-Path $env:SETUP_NAME).Path, 14)   # RT_GROUP_ICON
+          Write-Host "$env:SETUP_NAME -> RT_ICON=$icons RT_GROUP_ICON=$groups"
+          if ($icons -ne 0 -or $groups -ne 0) {
+            throw "Installer still carries icon resources (RT_ICON=$icons, RT_GROUP_ICON=$groups)"
+          }
+          # NSIS verifies its own CRC on startup; /NCRC would skip exactly the
+          # check we want to prove still passes, so run the real thing.
+          $p = Start-Process -FilePath ".\$env:SETUP_NAME" -ArgumentList "/S","/D=$PWD\crctest" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "Installer did not exit within 120 s" }
+          if ($p.ExitCode -ne 0) { throw "Installer exited with code $($p.ExitCode) - CRC check or install failed" }
+          if (-not (Test-Path "$PWD\crctest\BASSPlAIer.exe")) { throw "Silent install produced no BASSPlAIer.exe" }
+          Write-Host "Installer ran, passed its CRC check and installed correctly."
+          Remove-Item "$PWD\crctest" -Recurse -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
