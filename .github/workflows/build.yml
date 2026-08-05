@@ -153,19 +153,16 @@ jobs:
       - name: Build installer (NSIS)
         shell: pwsh
         run: |
-          choco install nsis reshack.portable --no-progress -y
-          # !packhdr calls Resource Hacker to strip the icon resources; the
-          # chocolatey shim is not used because shims for GUI apps return
-          # before the tool has finished writing the file.
-          $rh = (Get-ChildItem "C:\ProgramData\chocolatey\lib\reshack.portable" -Filter ResourceHacker.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-          if (-not $rh) { throw "ResourceHacker.exe not found after 'choco install reshack.portable'" }
-          Write-Host "Resource Hacker: $rh"
+          choco install nsis --no-progress -y
+          # !packhdr runs strip-icons.ps1 on the exe stub; pass an absolute path
+          # so it does not matter what directory makensis spawns the command in.
+          $strip = (Resolve-Path strip-icons.ps1).Path
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $out = "BASSPlAIer-$env:GITHUB_REF_NAME-Setup.exe"
           } else {
             $out = "BASSPlAIer-Setup.exe"
           }
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" "/DRESHACKER=$rh" installer.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" "/DAPPVERSION=$env:APPVERSION" "/DOUTFILE=$out" "/DSTRIPICONS=$strip" installer.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
           "SETUP_NAME=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 

@@ -47,13 +47,15 @@ SetCompressor /SOLID lzma
 ; Strip the icon resources from the installer itself. !packhdr runs the command
 ; on the exe stub while it is being built - before the data is appended and the
 ; CRC is computed - so unlike editing the finished installer this does not trip
-; the "installer corrupted" check. strip-icons.rh deletes both the icon group
+; the "installer corrupted" check. strip-icons.ps1 deletes both the icon group
 ; and the RT_ICON entries it points at, leaving no icon resource at all;
-; Windows then draws its generic exe icon. RESHACKER is passed by CI:
-;   makensis /DRESHACKER=C:\path\to\ResourceHacker.exe ...
+; Windows then draws its generic exe icon. Both paths are absolute so nothing
+; depends on the working directory makensis happens to run in. CI passes:
+;   makensis /DSTRIPICONS=C:\path\to\strip-icons.ps1 ...
 ; Without it the installer simply keeps the single icon from installer.ico.
-!ifdef RESHACKER
-  !packhdr "exehead.tmp" '"${RESHACKER}" -script strip-icons.rh -log CONSOLE'
+!ifdef STRIPICONS
+  !define EXEHEAD_TMP "$%TEMP%\bassplaier-exehead.tmp"
+  !packhdr "${EXEHEAD_TMP}" 'powershell -NoProfile -ExecutionPolicy Bypass -File "${STRIPICONS}" "${EXEHEAD_TMP}"'
 !endif
 
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
