@@ -4,7 +4,8 @@
  *
  * A playlist fills the left pane; opened files (dialog, command line,
  * drag & drop from Explorer) are queued there and played in order.
- * Double-click or Enter plays the selected entry, Delete removes it.
+ * Double-click or Enter plays the selected entry, Delete removes it
+ * (removing the playing track stops it).
  *
  * Keyboard:
  *   O           Open file(s) (added to the playlist)
@@ -436,9 +437,16 @@ static void plRemove(int idx)
             (size_t)(g_plCount - idx - 1) * sizeof(*g_plFiles));
     g_plCount--;
     ListView_DeleteItem(g_hPlist, idx);
-    if (g_plCur == idx)      g_plCur = -1;  /* playing row removed: keep playing,
-                                             * but auto-advance stops */
-    else if (g_plCur > idx)  g_plCur--;
+    if (g_plCur == idx) {
+        /* the playing row is gone: unload it, so it can't be played again
+         * from a list it is no longer in (an empty list plays nothing) */
+        closeStream();
+        g_file[0] = 0;
+        g_plCur = -1;
+        updateList();
+    } else if (g_plCur > idx) {
+        g_plCur--;
+    }
 }
 
 /* the playing track reached its end (posted from the BASS sync thread) */

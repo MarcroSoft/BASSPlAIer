@@ -10,7 +10,8 @@ Please Note: Virtually all of this code is written by AI, so there might be some
 - Playlist pane to the left of the status list: opened files are queued and
   played in order (auto-advance when a track ends). Double-click or `Enter`
   plays the selected entry, `Delete` removes it; the playing track is marked
-  with `>`.
+  with `>`. Removing the playing track stops playback, so an empty playlist
+  plays nothing.
 - Open files from Explorer: audio files can be dragged onto the window, passed
   on the command line, or opened via **Open with → BASS PlAIer** (the installer
   registers the formats). If the player is already running, the file is handed
@@ -32,7 +33,7 @@ Please Note: Virtually all of this code is written by AI, so there might be some
 | `Tab` | Switch between the playlist and the status list |
 | `Space` | Play / pause |
 | `Enter` | Play from the start (in the playlist: play the selected track) |
-| `Delete` | Remove the selected track (in the playlist) |
+| `Delete` | Remove the selected track (in the playlist); stops it if it is playing |
 | `Pause`/`Break` | Play / pause — **global** hotkey, works even when the window is not focused |
 | `←` / `→` | Seek −5 / +5 sec |
 | `Ctrl+←` / `Ctrl+→` | Seek −30 / +30 sec |
