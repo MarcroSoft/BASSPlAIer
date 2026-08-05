@@ -38,6 +38,12 @@ SetCompressor /SOLID lzma
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
 
+; Our own icon replaces MUI's default one, which carries 7 images (7 RT_ICON
+; resources). installer.ico holds a single 32x32 image, so the installer and
+; the uninstaller end up with one icon resource each.
+!define MUI_ICON   "installer.ico"
+!define MUI_UNICON "installer.ico"
+
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
