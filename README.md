@@ -100,6 +100,20 @@ cl /O2 player.c version.res /link bass.lib bass_fx.lib bassenc.lib comctl32.lib 
 The version is taken from the `APPVERSION` environment variable (dotted, e.g. `1.2.3`;
 defaults to `0.0.0`) and is embedded as the exe's product name / version info.
 
+### 32-bit build (experimental)
+
+`build32.bat` produces a 32-bit exe with **PE subsystem 4.0**, i.e. one the Windows 95
+and NT 4.0 loaders will accept. It uses MinGW-w64's i686 `gcc` and `windres` rather than
+MSVC, whose linker enforces a minimum subsystem version of 5.01 and silently discards
+anything lower (`LNK4010`). It links straight against the DLLs, so no MinGW import
+libraries are needed. CI builds it in a separate job and uploads it as a workflow
+artifact; it is not attached to releases.
+
+Whether it actually *runs* on such a machine is a separate, open question — the exe is
+only one of three layers. The BASS DLLs have their own requirements, the listview styles
+need comctl32 4.70 (the IE 4 era, not a bare NT 4.0 install), and NT 4.0 has very limited
+DirectSound, so `BASS_Init` is likelier to succeed on Windows 95/98 than on NT 4.0.
+
 ## Notes
 
 - The stream is created as a decoder channel (`BASS_STREAM_DECODE`) and wrapped in `BASS_FX_TempoCreate`, so the tempo can be changed live. `BASS_FX_FREESOURCE` ensures the source is freed automatically.
