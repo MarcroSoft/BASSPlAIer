@@ -101,7 +101,8 @@ jobs:
             @{ name = "basswv";   url = "https://www.un4seen.com/files/basswv24.zip" },
             @{ name = "bassape";  url = "https://www.un4seen.com/files/bassape24.zip" },
             @{ name = "bassdsd";  url = "https://www.un4seen.com/files/bassdsd24.zip" },
-            @{ name = "bass_aac"; url = "https://www.un4seen.com/files/z/2/bass_aac24.zip" }
+            @{ name = "bass_aac"; url = "https://www.un4seen.com/files/z/2/bass_aac24.zip" },
+            @{ name = "bass_spx"; url = "https://www.un4seen.com/files/z/2/bass_spx24.zip" }
           )
           New-Item -ItemType Directory -Path plugins | Out-Null
           foreach ($p in $plugins) {

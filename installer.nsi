@@ -128,6 +128,10 @@ SectionGroup "Extra format plugins" SEC_PLUGINS
     SetOutPath "$INSTDIR\plugins"
     File "release\plugins\bassdsd.dll"
   SectionEnd
+  Section /o "Speex (.spx)" SEC_PL_SPX
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bass_spx.dll"
+  SectionEnd
 SectionGroupEnd
 
 Section "Associate audio files with BASSPlAIer" SEC_ASSOC
@@ -170,6 +174,7 @@ Section "Uninstall"
   Delete "$INSTDIR\plugins\basswv.dll"
   Delete "$INSTDIR\plugins\bassape.dll"
   Delete "$INSTDIR\plugins\bassdsd.dll"
+  Delete "$INSTDIR\plugins\bass_spx.dll"
   RMDir  "$INSTDIR\plugins"
 
   RMDir  "$INSTDIR"

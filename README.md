@@ -70,7 +70,7 @@ Prebuilt x64 packages are attached to each [GitHub release](../../releases): a p
 Start-menu and desktop shortcuts and an uninstaller, and registers the audio formats so
 they can be opened from Explorer's **Open with** menu. The BASS DLLs are bundled in.
 
-Format plugins for Opus, FLAC, AAC, Apple Lossless, WavPack, Monkey's Audio and DSD are
+Format plugins for Opus, FLAC, AAC, Apple Lossless, WavPack, Monkey's Audio, DSD and Speex are
 offered on the installer's components page — none are ticked by default, so pick the ones
 you want. The portable `.zip` simply ships them all in its `plugins\` folder.
 
