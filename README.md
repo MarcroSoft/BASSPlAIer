@@ -3,7 +3,7 @@
 A minimal native Windows player in C built on **BASS**, **BASS_FX** and **BASSenc**.
 Status is shown in a real `SysListView32`, and everything is controlled from the keyboard.
 
-Please Note: Virtually all of this code is written by AI, so there might be some bugs here and there. The program has been tested and found to be working.
+The player is written entirely by AI, hence the name.
 
 ## Features
 
@@ -13,8 +13,8 @@ Please Note: Virtually all of this code is written by AI, so there might be some
   with `>`. Removing the playing track stops playback, so an empty playlist
   plays nothing.
 - Open files from Explorer: audio files can be dragged onto the window, passed
-  on the command line, or opened via **Open with → BASS PlAIer** (the installer
-  registers the formats). If the player is already running, the file is handed
+  on the command line, or opened via **Open with → BASS PlAIer** (the file
+  formats can be registered during the installation process). If the player is already running, the file is handed
   to the running instance instead of starting a new one.
 - Playback via BASS with plugin loading (all `.dll` files in the `plugins\` folder **next to the exe** are loaded with `BASS_PluginLoad`, e.g. `bassflac.dll`, `bassopus.dll`, `bass_aac.dll`).
 - Real-time tempo change with BASS_FX (`BASS_ATTRIB_TEMPO`) — without changing the pitch.
