@@ -17,8 +17,13 @@ rem _WIN32_WINNT/_WIN32_IE pin the API surface to NT 4.0 with IE 4 era common
 rem controls: the listview extended styles need comctl32 4.70 (_WIN32_IE 0x0300)
 rem and NMITEMACTIVATE, used for the playlist double-click, needs 0x0400.
 rem Linking straight against the DLLs avoids needing MinGW import libraries.
-gcc -O2 -D_WIN32_WINNT=0x0400 -D_WIN32_IE=0x0400 player.c version32.o -o BASSPlAIer.exe ^
-  -mwindows ^
+rem Size flags: -Os over -O2, each function in its own section so the linker can
+rem drop the unreferenced ones, and -s to strip the symbol table. --gc-sections
+rem is a linker option, hence -Wl. The version resource is not referenced by any
+rem code, so CI checks it survived the collection.
+gcc -Os -ffunction-sections -D_WIN32_WINNT=0x0400 -D_WIN32_IE=0x0400 player.c version32.o -o BASSPlAIer.exe ^
+  -mwindows -s ^
+  -Wl,--gc-sections ^
   -Wl,--major-os-version,4 -Wl,--minor-os-version,0 ^
   -Wl,--major-subsystem-version,4 -Wl,--minor-subsystem-version,0 ^
   bass.dll bass_fx.dll bassenc.dll ^

@@ -359,7 +359,8 @@ jobs:
       - name: Verify it is 32-bit with subsystem 4.0
         shell: pwsh
         run: |
-          $b = [IO.File]::ReadAllBytes((Resolve-Path BASSPlAIer.exe).Path)
+          $exe = (Resolve-Path BASSPlAIer.exe).Path
+          $b = [IO.File]::ReadAllBytes($exe)
           $pe = [BitConverter]::ToUInt32($b, 0x3C)
           if ($b[$pe] -ne 0x50 -or $b[$pe+1] -ne 0x45) { throw "not a PE file" }
           $machine = [BitConverter]::ToUInt16($b, $pe + 4)
@@ -367,9 +368,35 @@ jobs:
           # the fields from offset 40 on sit in the same place in PE32 and PE32+
           $subMaj  = [BitConverter]::ToUInt16($b, $opt + 48)
           $subMin  = [BitConverter]::ToUInt16($b, $opt + 50)
-          Write-Host ("machine=0x{0:X4} subsystem version={1}.{2}" -f $machine, $subMaj, $subMin)
+          Write-Host ("$([IO.Path]::GetFileName($exe)): machine=0x{0:X4} subsystem version={1}.{2} size={3} bytes" -f $machine, $subMaj, $subMin, $b.Length)
           if ($machine -ne 0x014c) { throw "expected i386 (0x014C) but got 0x$('{0:X4}' -f $machine)" }
           if ($subMaj -ne 4 -or $subMin -ne 0) { throw "expected subsystem version 4.0 but got $subMaj.$subMin" }
+
+          # --gc-sections drops sections nothing references, and no code
+          # references the version resource - make sure it is still there.
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Res32 {
+              [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+              public static extern IntPtr LoadLibraryEx(string f, IntPtr h, uint flags);
+              [DllImport("kernel32.dll")] public static extern bool FreeLibrary(IntPtr h);
+              public delegate bool Cb(IntPtr m, IntPtr t, IntPtr n, IntPtr p);
+              [DllImport("kernel32.dll", SetLastError=true)]
+              public static extern bool EnumResourceNames(IntPtr m, IntPtr t, Cb cb, IntPtr p);
+              public static int Count(string file, int type) {
+                  int n = 0;
+                  IntPtr h = LoadLibraryEx(file, IntPtr.Zero, 0x00000002);   // AS_DATAFILE
+                  if (h == IntPtr.Zero) throw new Exception("LoadLibraryEx failed on " + file);
+                  try { EnumResourceNames(h, new IntPtr(type), (a,b,c,d) => { n++; return true; }, IntPtr.Zero); }
+                  finally { FreeLibrary(h); }
+                  return n;
+              }
+          }
+          "@
+          $ver = [Res32]::Count($exe, 16)   # RT_VERSION
+          Write-Host "RT_VERSION resources: $ver"
+          if ($ver -lt 1) { throw "the version resource did not survive --gc-sections" }
 
       - name: Zip the 32-bit build
         shell: pwsh

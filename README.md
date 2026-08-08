@@ -106,7 +106,8 @@ defaults to `0.0.0`) and is embedded as the exe's product name / version info.
 and NT 4.0 loaders will accept. It uses MinGW-w64's i686 `gcc` and `windres` rather than
 MSVC, whose linker enforces a minimum subsystem version of 5.01 and silently discards
 anything lower (`LNK4010`). It links straight against the DLLs, so no MinGW import
-libraries are needed. CI builds it in a separate job and uploads it as a workflow
+libraries are needed, and is built for size: `-Os -ffunction-sections
+-Wl,--gc-sections -s`. CI builds it in a separate job and uploads it as a workflow
 artifact; it is not attached to releases.
 
 Whether it actually *runs* on such a machine is a separate, open question — the exe is
