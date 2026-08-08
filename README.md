@@ -65,10 +65,11 @@ The player is written entirely by AI, hence the name.
 
 ## Download
 
-Prebuilt x64 packages are attached to each [GitHub release](../../releases): a portable
-`.zip` and a Windows installer (`BASSPlAIer-Setup.exe`, built with NSIS) that adds
-Start-menu and desktop shortcuts and an uninstaller, and registers the audio formats so
-they can be opened from Explorer's **Open with** menu. The BASS DLLs are bundled in.
+Prebuilt packages are attached to each [GitHub release](../../releases): a portable x64
+`.zip`, a portable 32-bit `.zip` (`BASSPlAIer-x86.zip`, see below), and a Windows
+installer (`BASSPlAIer-Setup.exe`, built with NSIS, x64) that adds Start-menu and desktop
+shortcuts and an uninstaller, and registers the audio formats so they can be opened from
+Explorer's **Open with** menu. The BASS DLLs are bundled in.
 
 Format plugins for Opus, FLAC, AAC, Apple Lossless, WavPack, Monkey's Audio, DSD and Speex are
 offered on the installer's components page — none are ticked by default, so pick the ones
@@ -107,13 +108,13 @@ and NT 4.0 loaders will accept. It uses MinGW-w64's i686 `gcc` and `windres` rat
 MSVC, whose linker enforces a minimum subsystem version of 5.01 and silently discards
 anything lower (`LNK4010`). It links straight against the DLLs, so no MinGW import
 libraries are needed, and is built for size: `-Os -ffunction-sections
--Wl,--gc-sections -s`. CI builds it in a separate job and uploads it as a workflow
-artifact; it is not attached to releases.
+-Wl,--gc-sections -s`. CI builds it in a separate job and attaches the resulting
+`BASSPlAIer-x86.zip` to the release.
 
-Whether it actually *runs* on such a machine is a separate, open question — the exe is
-only one of three layers. The BASS DLLs have their own requirements, the listview styles
-need comctl32 4.70 (the IE 4 era, not a bare NT 4.0 install), and NT 4.0 has very limited
-DirectSound, so `BASS_Init` is likelier to succeed on Windows 95/98 than on NT 4.0.
+How far back it actually runs is untested: the exe is only one of three layers. The BASS
+DLLs have their own requirements, the listview styles need comctl32 4.70 (the IE 4 era,
+not a bare NT 4.0 install), and NT 4.0 has very limited DirectSound, so `BASS_Init` is
+likelier to succeed on Windows 95/98 than on NT 4.0.
 
 ## Notes
 
