@@ -22,8 +22,9 @@ The player is written entirely by AI, hence the name.
 - Independent pitch shift in semitones (`BASS_ATTRIB_TEMPO_PITCH`) and playback sample-rate / frequency control in 100 Hz steps (`BASS_ATTRIB_TEMPO_FREQ`).
 - Command box (`C`): type `30` to jump to 30 minutes, `+5` / `-3` to seek relative, `t75` to set tempo, `p6` for pitch, `q44100` for frequency, `v150` for volume.
 - 10-band graphic equalizer with BASS_FX (`BASS_FX_BFX_PEAKEQ`) at centres 80, 160, 320, 450, 900 Hz, 1.8, 3.6, 7, 10, 14 kHz. The band gains are also applied to the recording.
+- BPM detection with BASS_FX (`BASS_FX_BPM_DecodeGet`): every track that starts playing is analysed in a background thread, and the shown BPM follows the speed and frequency settings.
 - Recording of what is currently playing to a `.wav` file with BASSenc (`BASS_Encode_Start` / `BASS_Encode_Stop`).
-- Time, status, length, tempo etc. are shown continuously in a `SysListView32` (report view).
+- Time, status, length, tempo, BPM etc. are shown continuously in a `SysListView32` (report view).
 
 ## Keyboard shortcuts
 
@@ -55,6 +56,7 @@ The player is written entirely by AI, hence the name.
 | `Ctrl`+`1`…`9`, `0` | Reset that EQ band to 0 dB |
 | `I` / `Shift+I` | Cut / boost all EQ bands 1 dB |
 | `Ctrl+I` | Reset all EQ bands to flat |
+| `Ctrl+B` | Detect the BPM again, starting from the current position |
 | `R` | Start recording |
 | `E` | Stop recording |
 | `Alt+F4` | Quit |
@@ -119,5 +121,6 @@ likelier to succeed on Windows 95/98 than on NT 4.0.
 ## Notes
 
 - The stream is created as a decoder channel (`BASS_STREAM_DECODE`) and wrapped in `BASS_FX_TempoCreate`, so the tempo can be changed live. `BASS_FX_FREESOURCE` ensures the source is freed automatically.
+- The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Press `Ctrl+B` to analyse again from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection. BASS_FX always returns its best guess, so material without a beat gives a meaningless number rather than nothing.
 - The recording captures exactly the samples the playing channel delivers — including the tempo change — because the encoder is attached to the tempo stream.
 - Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format — the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).

@@ -21,6 +21,7 @@
  *   Q / Shift+Q Frequency down / up (100 Hz);   Ctrl+Q reset to native
  *   Backspace   Reset tempo, pitch and frequency
  *   C           Command box (e.g. 30, +5, t75, p6, q44100, v150)
+ *   Ctrl+B      Detect the BPM again from the current position
  *   R           Start recording what is playing (-> recording.wav)
  *   E           Stop recording
  *   1..9, 0          Cut EQ band 1 dB (1 = 80 Hz .. 0 = 14 kHz)  [10-band EQ]
@@ -72,6 +73,9 @@ static float     g_freqDef = 0.0f;     /* file's native sample rate (for reset) 
 static BOOL      g_rec     = FALSE;    /* recording right now? */
 static char      g_file[MAX_PATH] = "";
 static char      g_recFile[MAX_PATH] = "";  /* current recording filename */
+static float     g_bpm     = 0.0f;     /* BPM of the source, 0 = not known */
+static volatile LONG g_bpmGen  = 0;    /* id of the newest BPM scan */
+static volatile LONG g_bpmBusy = 0;    /* number of scans running */
 
 /* ---- playlist ---- */
 static char    (*g_plFiles)[MAX_PATH] = NULL;  /* full paths, grows on demand */
@@ -93,7 +97,7 @@ static const float g_eqFreq[EQ_BANDS] = {
 /* ---- ListView rows ---- */
 enum {
     ROW_FILE = 0, ROW_STATUS, ROW_POS, ROW_REMAIN, ROW_LEN,
-    ROW_TEMPO, ROW_PITCH, ROW_FREQ, ROW_VOL, ROW_REC,
+    ROW_TEMPO, ROW_PITCH, ROW_FREQ, ROW_BPM, ROW_VOL, ROW_REC,
     ROW_EQ_LO,                     /* EQ bands 1-5 on one row, 6-10 on the next */
     ROW_EQ_HI,
     ROW_COUNT
@@ -102,7 +106,7 @@ enum {
 /* column-0 label for each logical row */
 static const char *g_rowName[ROW_COUNT] = {
     "File:", "Status:", "Position:", "Remaining:", "Length:",
-    "Speed:", "Pitch:", "Frequency:", "Volume:", "Recording:",
+    "Speed:", "Pitch:", "Frequency:", "BPM:", "Volume:", "Recording:",
     "Equalizer 1:", "Equalizer 2:"
 };
 /* current listview index of each logical row, or -1 while hidden */
@@ -319,6 +323,94 @@ static void fmtTime(double secs, char *out, size_t n)
     snprintf(out, n, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
 }
 
+/* ---- BPM detection with BASS_FX ----
+ * BASS_FX_BPM_DecodeGet() needs its own decoding channel and reads the
+ * file as fast as it can, so the scan runs in a worker thread and the
+ * result is picked up by the timer that refreshes the list. */
+#define BPM_MIN       45      /* detection range, see MAKELONG below */
+#define BPM_MAX      230
+#define BPM_SCAN_SECS 60.0    /* how much audio to analyse */
+
+typedef struct {
+    char   path[MAX_PATH];
+    double start;             /* where to start the analysis (seconds) */
+    LONG   gen;               /* which scan this is */
+} BPMJOB;
+
+static DWORD WINAPI bpmThread(LPVOID param)
+{
+    BPMJOB *job = (BPMJOB *)param;
+    float bpm = 0.0f;
+
+    DWORD dec = BASS_StreamCreateFile(FALSE, job->path, 0, 0,
+        BASS_STREAM_DECODE | BASS_SAMPLE_FLOAT);
+    if (dec) {
+        double len = BASS_ChannelBytes2Seconds(dec,
+            BASS_ChannelGetLength(dec, BASS_POS_BYTE));
+        double start = job->start;
+        double end;
+        /* too close to the end (or unknown length) -> analyse from the start */
+        if (len > 0.0 && start > len - 5.0) start = 0.0;
+        if (start < 0.0) start = 0.0;
+        end = start + BPM_SCAN_SECS;
+        if (len > 0.0 && end > len) end = len;
+        bpm = BASS_FX_BPM_DecodeGet(dec, start, end,
+            MAKELONG(BPM_MIN, BPM_MAX), 0, NULL, NULL);
+        BASS_FX_BPM_Free(dec);
+        BASS_StreamFree(dec);
+    }
+
+    /* a newer scan (or another file) may have been started meanwhile */
+    if (job->gen == g_bpmGen) g_bpm = bpm;
+    InterlockedDecrement((LONG *)&g_bpmBusy);
+    free(job);
+    return 0;
+}
+
+/* throw away the result of any scan that is still running */
+static void cancelBpm(void)
+{
+    InterlockedIncrement((LONG *)&g_bpmGen);
+    g_bpm = 0.0f;
+}
+
+static void startBpmScan(double startSec)
+{
+    if (!g_stream || !g_file[0]) return;
+
+    BPMJOB *job = (BPMJOB *)malloc(sizeof(*job));
+    if (!job) return;
+    lstrcpyn(job->path, g_file, MAX_PATH);
+    job->start = startSec;
+    cancelBpm();
+    job->gen = g_bpmGen;
+
+    InterlockedIncrement((LONG *)&g_bpmBusy);
+    HANDLE th = CreateThread(NULL, 0, bpmThread, job, 0, NULL);
+    if (!th) {
+        InterlockedDecrement((LONG *)&g_bpmBusy);
+        free(job);
+    } else {
+        CloseHandle(th);
+    }
+}
+
+/* wait for a running scan, so the worker is not left decoding
+ * while BASS is being shut down */
+static void waitForBpm(void)
+{
+    int spins = 500;                 /* at most ~5 seconds */
+    while (g_bpmBusy && spins-- > 0) Sleep(10);
+}
+
+/* the position we are playing, in seconds (on the file's own timeline) */
+static double curPos(void)
+{
+    if (!g_stream) return 0.0;
+    return BASS_ChannelBytes2Seconds(g_stream,
+        BASS_ChannelGetPosition(g_stream, BASS_POS_BYTE));
+}
+
 static void stopEncode(void)
 {
     if (g_rec && g_stream) {
@@ -330,6 +422,7 @@ static void stopEncode(void)
 static void closeStream(void)
 {
     stopEncode();
+    cancelBpm();
     if (g_stream) {
         BASS_ChannelStop(g_stream);
         BASS_StreamFree(g_stream);   /* BASS_FX_FREESOURCE frees the whole chain */
@@ -515,6 +608,7 @@ static BOOL playFile(HWND hwnd, const char *path)
     /* advance to the next playlist track when this one ends */
     BASS_ChannelSetSync(g_stream, BASS_SYNC_END, 0, onTrackEnd, NULL);
     BASS_ChannelPlay(g_stream, FALSE);
+    startBpmScan(0.0);         /* detect the BPM of this track */
     return TRUE;
 }
 
@@ -760,6 +854,22 @@ static void updateList(void)
         snprintf(buf, sizeof(buf), "%.0f Hz", g_freq);
         lvSetText(ROW_FREQ, buf);
 
+        /* tempo and frequency both change the speed, and with it the BPM */
+        if (g_bpm > 0.0f) {
+            float rate = (100.0f + g_tempo) / 100.0f;
+            if (g_freqDef > 0.0f && g_freq > 0.0f) rate *= g_freq / g_freqDef;
+            float cur = g_bpm * rate;
+            if (rate != 1.0f)
+                snprintf(buf, sizeof(buf), "%.1f (original %.1f)", cur, g_bpm);
+            else
+                snprintf(buf, sizeof(buf), "%.1f", g_bpm);
+        } else if (g_bpmBusy) {
+            snprintf(buf, sizeof(buf), "analysing...");
+        } else {
+            snprintf(buf, sizeof(buf), "unknown");
+        }
+        lvSetText(ROW_BPM, buf);
+
         float vol = 1.0f;
         BASS_ChannelGetAttribute(g_stream, BASS_ATTRIB_VOL, &vol);
         snprintf(buf, sizeof(buf), "%.0f %%", vol * 100.0f);
@@ -772,6 +882,7 @@ static void updateList(void)
         lvSetText(ROW_LEN, "0:00:00");
         lvSetText(ROW_TEMPO, "0 %");
         lvSetText(ROW_FREQ, "-");
+        lvSetText(ROW_BPM, "-");
         lvSetText(ROW_VOL, "100 %");
     }
     if (g_rec) {
@@ -965,7 +1076,9 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
                     else if (shift)  changeVol(+0.01f);    /* Shift+V: up   */
                     else             changeVol(-0.01f);    /* V: down       */
                     break;
-    case 'B':       toggleReverse(); break;  /* play backwards on/off */
+    case 'B':       if (ctrl) startBpmScan(curPos());   /* Ctrl+B: detect BPM again */
+                    else      toggleReverse();           /* B: play backwards on/off */
+                    break;
     case VK_F11:    cueStart(-1); break;     /* hold = fast rewind  (tape style) */
     case VK_F12:    cueStart(+1); break;     /* hold = fast forward (tape style) */
     case 'R':       startEncode(hwnd); break;
@@ -1060,6 +1173,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         KillTimer(hwnd, ID_TIMER);
         UnregisterHotKey(hwnd, ID_HOTKEY_PAUSE);
         closeStream();
+        waitForBpm();
         PostQuitMessage(0);
         return 0;
     }
