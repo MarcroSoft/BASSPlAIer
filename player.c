@@ -21,7 +21,8 @@
  *   Q / Shift+Q Frequency down / up (100 Hz);   Ctrl+Q reset to native
  *   Backspace   Reset tempo, pitch and frequency
  *   C           Command box (e.g. 30, +5, t75, p6, q44100, v150)
- *   Ctrl+B      Detect the BPM again from the current position
+ *   Ctrl+B      Show the BPM and detect it from the current position
+ *   Ctrl+Shift+B  Hide the BPM row again
  *   R           Start recording what is playing (-> recording.wav)
  *   E           Stop recording
  *   1..9, 0          Cut EQ band 1 dB (1 = 80 Hz .. 0 = 14 kHz)  [10-band EQ]
@@ -114,6 +115,7 @@ static int  g_rowIdx[ROW_COUNT];
 static BOOL g_showTempo = FALSE;   /* Tempo row hidden while tempo == 0 % */
 static BOOL g_showPitch = FALSE;   /* Pitch row hidden while pitch == 0 */
 static BOOL g_showEq    = FALSE;   /* EQ rows hidden while every band == 0 dB */
+static BOOL g_showBpm   = FALSE;   /* BPM row hidden until Ctrl+B asks for it */
 
 static BOOL handleKey(HWND hwnd, WPARAM key);   /* forward */
 static void cueStop(void);                      /* forward (used by ListProc) */
@@ -220,6 +222,7 @@ static void rebuildRows(void)
     for (int r = 0; r < ROW_COUNT; r++) {
         if (r == ROW_TEMPO && !g_showTempo) continue;
         if (r == ROW_PITCH && !g_showPitch) continue;
+        if (r == ROW_BPM && !g_showBpm) continue;
         if ((r == ROW_EQ_LO || r == ROW_EQ_HI) && !g_showEq) continue;
         LVITEM it = {0};
         it.mask = LVIF_TEXT;
@@ -608,7 +611,10 @@ static BOOL playFile(HWND hwnd, const char *path)
     /* advance to the next playlist track when this one ends */
     BASS_ChannelSetSync(g_stream, BASS_SYNC_END, 0, onTrackEnd, NULL);
     BASS_ChannelPlay(g_stream, FALSE);
-    startBpmScan(0.0);         /* detect the BPM of this track */
+    /* the BPM row is off by default, so only spend a worker thread on the
+     * analysis while it is actually being shown */
+    if (g_showBpm) startBpmScan(0.0);
+    else           cancelBpm();   /* drop the previous track's value */
     return TRUE;
 }
 
@@ -1076,8 +1082,18 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
                     else if (shift)  changeVol(+0.01f);    /* Shift+V: up   */
                     else             changeVol(-0.01f);    /* V: down       */
                     break;
-    case 'B':       if (ctrl) startBpmScan(curPos());   /* Ctrl+B: detect BPM again */
-                    else      toggleReverse();           /* B: play backwards on/off */
+    case 'B':       if (ctrl && shift) {               /* Ctrl+Shift+B: hide it again */
+                        if (g_showBpm) {
+                            g_showBpm = FALSE;
+                            cancelBpm();                 /* discard a running scan */
+                            rebuildRows();
+                        }
+                    } else if (ctrl) {                   /* Ctrl+B: show it and detect */
+                        if (!g_showBpm) { g_showBpm = TRUE; rebuildRows(); }
+                        startBpmScan(curPos());
+                    } else {
+                        toggleReverse();                 /* B: play backwards on/off */
+                    }
                     break;
     case VK_F11:    cueStart(-1); break;     /* hold = fast rewind  (tape style) */
     case VK_F12:    cueStart(+1); break;     /* hold = fast forward (tape style) */
