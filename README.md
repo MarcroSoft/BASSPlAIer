@@ -24,6 +24,9 @@ The player is written entirely by AI, hence the name.
 - 10-band graphic equalizer with BASS_FX (`BASS_FX_BFX_PEAKEQ`) at centres 80, 160, 320, 450, 900 Hz, 1.8, 3.6, 7, 10, 14 kHz. The band gains are also applied to the recording.
 - Optional BPM detection with BASS_FX (`BASS_FX_BPM_DecodeGet`), hidden by default: press `Ctrl+B` to show the row and analyse the track in a background thread. While the row is shown each new track is analysed as it starts, and the reading follows the speed and frequency settings.
 - Recording of what is currently playing to a `.wav` file with BASSenc (`BASS_Encode_Start` / `BASS_Encode_Stop`).
+  Recordings are always saved in a `BASS PlAIer` folder inside your **Music** folder
+  (`recording_YYYYMMDD_HHMMSS.wav`), no matter where the player was started from. On
+  Windows versions without a Music folder they go to `My Documents\BASS PlAIer` instead.
 - Time, status, length, tempo etc. are shown continuously in a `SysListView32` (report view).
 
 ## Keyboard shortcuts

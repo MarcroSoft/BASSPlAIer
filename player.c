@@ -23,7 +23,7 @@
  *   C           Command box (e.g. 30, +5, t75, p6, q44100, v150)
  *   Ctrl+B      Show the BPM and detect it from the current position
  *   Ctrl+Shift+B  Hide the BPM row again
- *   R           Start recording what is playing (-> recording.wav)
+ *   R           Start recording what is playing (-> Music\BASS PlAIer)
  *   E           Stop recording
  *   1..9, 0          Cut EQ band 1 dB (1 = 80 Hz .. 0 = 14 kHz)  [10-band EQ]
  *   Shift+1..9, 0    Boost that EQ band 1 dB
@@ -38,6 +38,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,7 @@
 #define ID_TIMER    1
 #define ID_HOTKEY_PAUSE 1
 #define PLUGIN_DIR  "plugins"
+#define REC_DIR     "BASS PlAIer"      /* recordings go to Music\BASS PlAIer */
 #define PLAYLIST_W  200                /* width of the playlist pane (px) */
 #define WM_APP_TRACKEND (WM_APP + 1)   /* posted when the playing track ends */
 
@@ -292,6 +294,17 @@ static void buildList(HWND hwnd)
     SetFocus(g_hPlist);
 }
 
+/* ---- helper: folder the exe lives in (dir is a MAX_PATH buffer) ---- */
+static BOOL exeDir(char *dir)
+{
+    DWORD n = GetModuleFileName(NULL, dir, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return FALSE;
+    char *slash = strrchr(dir, '\\');
+    if (!slash) return FALSE;
+    *slash = 0;                     /* strip the exe name */
+    return TRUE;
+}
+
 /* ---- plugin loading: all .dll in the plugins folder next to the exe ----
  * The folder is resolved against the exe, not the working directory: opening
  * a file from Explorer starts us in the folder of that file, and a relative
@@ -299,11 +312,7 @@ static void buildList(HWND hwnd)
 static void loadPlugins(void)
 {
     char dir[MAX_PATH];
-    DWORD n = GetModuleFileName(NULL, dir, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return;
-    char *slash = strrchr(dir, '\\');
-    if (!slash) return;
-    *slash = 0;                     /* strip the exe name */
+    if (!exeDir(dir)) return;
 
     WIN32_FIND_DATA fd;
     char pattern[MAX_PATH];
@@ -814,23 +823,77 @@ static void playFromStart(void)
     BASS_ChannelPlay(g_stream, TRUE);   /* TRUE = restart from the beginning */
 }
 
+/* ---- folder recordings are written to ----
+ * Always an absolute path. A bare filename lands in the working directory,
+ * which is whatever started us: the folder of a file opened from Explorer,
+ * the last folder picked in the open dialog, or even System32.
+ * SHGetSpecialFolderLocation and SHGetMalloc are used rather than
+ * SHGetFolderPath because the Windows 95 shell32 has them too. */
+#ifndef CSIDL_MYMUSIC
+#define CSIDL_MYMUSIC 0x000d            /* Windows ME / 2000 and later */
+#endif
+static BOOL shellFolder(int csidl, char *dir)
+{
+    LPITEMIDLIST pidl;
+    LPMALLOC m;
+    if (SHGetSpecialFolderLocation(NULL, csidl, &pidl) != S_OK) return FALSE;
+    BOOL ok = SHGetPathFromIDList(pidl, dir) && dir[0];
+    if (SHGetMalloc(&m) == S_OK) {
+        m->lpVtbl->Free(m, pidl);
+        m->lpVtbl->Release(m);
+    }
+    return ok;
+}
+
+/* "BASS PlAIer" in the user's Music folder; My Documents where there is no
+ * Music folder (Windows 95/98/NT 4), the exe's folder as a last resort. If
+ * the subfolder cannot be created its parent is used as it is. */
+static BOOL recDir(char *dir)
+{
+    if (!shellFolder(CSIDL_MYMUSIC, dir) && !shellFolder(CSIDL_PERSONAL, dir) &&
+        !exeDir(dir))
+        return FALSE;
+    size_t n = strlen(dir);
+    if (n > 0 && dir[n - 1] == '\\') dir[n - 1] = 0;   /* drive root "C:\" */
+    char sub[MAX_PATH];
+    if (snprintf(sub, sizeof(sub), "%s\\%s", dir, REC_DIR) >= (int)sizeof(sub))
+        return TRUE;
+    CreateDirectory(sub, NULL);         /* fails harmlessly if it exists */
+    DWORD a = GetFileAttributes(sub);
+    if (a != 0xFFFFFFFF && (a & FILE_ATTRIBUTE_DIRECTORY))
+        lstrcpy(dir, sub);
+    return TRUE;
+}
+
 /* ---- start recording what is playing ---- */
 static void startEncode(HWND hwnd)
 {
     if (!g_stream || g_rec) return;
+    char dir[MAX_PATH];
+    if (!recDir(dir)) {
+        MessageBox(hwnd, "Could not find a folder for the recording.", APP_TITLE, MB_ICONERROR);
+        return;
+    }
     /* unique filename with date+time so nothing is overwritten */
     SYSTEMTIME t; GetLocalTime(&t);
-    snprintf(g_recFile, sizeof(g_recFile),
-        "recording_%04d%02d%02d_%02d%02d%02d.wav",
-        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    if (snprintf(g_recFile, sizeof(g_recFile),
+            "%s\\recording_%04d%02d%02d_%02d%02d%02d.wav", dir,
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)
+            >= (int)sizeof(g_recFile)) {
+        MessageBox(hwnd, "The recording folder path is too long.", APP_TITLE, MB_ICONERROR);
+        return;
+    }
     /* BASS_ENCODE_PCM writes a WAV in the channel's own format. The
      * channel is float, so this produces a 32-bit float WAV. (Add
      * BASS_ENCODE_FP_16BIT to convert to 16-bit integer instead.) */
     if (BASS_Encode_Start(g_stream, g_recFile,
             BASS_ENCODE_PCM, NULL, NULL))
         g_rec = TRUE;
-    else
-        MessageBox(hwnd, "Could not start recording.", APP_TITLE, MB_ICONERROR);
+    else {
+        char msg[MAX_PATH + 64];
+        snprintf(msg, sizeof(msg), "Could not start recording to\n%s", g_recFile);
+        MessageBox(hwnd, msg, APP_TITLE, MB_ICONERROR);
+    }
 }
 
 /* ---- update ListView ---- */
