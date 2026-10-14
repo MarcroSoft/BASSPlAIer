@@ -500,6 +500,29 @@ static BOOL eqActive(void)
     return FALSE;
 }
 
+/* ---- anti-alias filter of the tempo stream ----
+ * BASS_FX runs everything through SoundTouch's anti-alias filter, even at
+ * rate 1. Its taps are rounded with +0.5 but never truncated in the float
+ * build, so the filter colours the sound slightly (residual about -70 dB).
+ * It is only needed when the rate differs from 1 (pitch, frequency, cue), so
+ * it is switched off otherwise and a recording stays bit-identical. */
+static void updateAAFilter(void)
+{
+    if (!g_stream) return;
+    BOOL need = g_cueing || g_pitch != 0.0f ||
+                (g_freqDef > 0.0f && g_freq != g_freqDef) ||
+                BASS_ChannelIsSliding(g_stream, BASS_ATTRIB_TEMPO_FREQ);
+    BASS_ChannelSetAttribute(g_stream, BASS_ATTRIB_TEMPO_OPTION_USE_AA_FILTER,
+                             need ? 1.0f : 0.0f);
+}
+
+/* a frequency glide (cue spin-up/down) has finished: re-check the filter */
+static void CALLBACK onSlideEnd(HSYNC handle, DWORD channel, DWORD data, void *user)
+{
+    (void)handle; (void)channel; (void)data; (void)user;
+    updateAAFilter();
+}
+
 /* ---- playlist handling ---- */
 static const char *plBase(int idx)     /* filename without the directory */
 {
@@ -607,6 +630,9 @@ static BOOL playFile(HWND hwnd, const char *path)
         if (BASS_ChannelGetInfo(g_stream, &info)) g_freq = (float)info.freq;
     }
     g_freqDef = g_freq;
+    updateAAFilter();          /* rate is 1 -> AA filter off (bit-exact path) */
+    /* switch the AA filter off again once a cue glide back to normal is over */
+    BASS_ChannelSetSync(g_stream, BASS_SYNC_SLIDE, 0, onSlideEnd, NULL);
     setupEq();                 /* 10-band EQ (reapplies current gains) */
     /* advance to the next playlist track when this one ends */
     BASS_ChannelSetSync(g_stream, BASS_SYNC_END, 0, onTrackEnd, NULL);
@@ -693,6 +719,7 @@ static void setPitch(float v)
     if (v < -60.0f) v = -60.0f;
     if (v >  60.0f) v =  60.0f;
     g_pitch = v;
+    updateAAFilter();          /* on before shifting, off once back at 0 */
     BASS_ChannelSetAttribute(g_stream, BASS_ATTRIB_TEMPO_PITCH, g_pitch);
 }
 static void changePitch(float delta) { setPitch(g_pitch + delta); }
@@ -706,6 +733,7 @@ static void setFreq(float v)
     if (v > 192000.0f) v = 192000.0f;
     g_freq = v;
     BASS_ChannelSetAttribute(g_stream, BASS_ATTRIB_TEMPO_FREQ, g_freq);
+    updateAAFilter();          /* after setting: this also ends a running glide */
 }
 static void changeFreq(float delta) { setFreq(g_freq + delta); }
 static void resetFreq(void)         { if (g_freqDef > 0.0f) setFreq(g_freqDef); }
@@ -752,6 +780,7 @@ static void cueStart(int dir)        /* +1 = forward, -1 = backward */
 {
     if (!g_stream || g_cueing) return;
     g_cueing = TRUE;
+    updateAAFilter();                    /* the rate is about to leave 1 */
     setReverseDir(dir);
     /* glide the rate up rather than jumping, so it spins up like a tape.
      * Slide the attribute directly so the user's g_freq setting is untouched. */

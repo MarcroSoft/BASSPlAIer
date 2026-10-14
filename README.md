@@ -17,7 +17,7 @@ The player is written entirely by AI, hence the name.
   formats can be registered during the installation process). If the player is already running, the file is handed
   to the running instance instead of starting a new one.
 - Playback via BASS with plugin loading (all `.dll` files in the `plugins\` folder **next to the exe** are loaded with `BASS_PluginLoad`, e.g. `bassflac.dll`, `bassopus.dll`, `bass_aac.dll`).
-- Real-time tempo change with BASS_FX (`BASS_ATTRIB_TEMPO`) — without changing the pitch.
+- Real-time tempo change with BASS_FX (`BASS_ATTRIB_TEMPO`), without changing the pitch.
 - Reverse playback (`BASS_FX_ReverseCreate`) and tape-recorder-style fast cue/review: hold `F11`/`F12` to scrub backward/forward at speed.
 - Independent pitch shift in semitones (`BASS_ATTRIB_TEMPO_PITCH`) and playback sample-rate / frequency control in 100 Hz steps (`BASS_ATTRIB_TEMPO_FREQ`).
 - Command box (`C`): type `30` to jump to 30 minutes, `+5` / `-3` to seek relative, `t75` to set tempo, `p6` for pitch, `q44100` for frequency, `v150` for volume.
@@ -30,16 +30,16 @@ The player is written entirely by AI, hence the name.
 
 | Key | Action |
 |------|----------|
-| `O` | Open file(s) — added to the playlist |
+| `O` | Open file(s), added to the playlist |
 | `Tab` | Switch between the playlist and the status list |
 | `Space` | Play / pause |
 | `Enter` | Play from the start (in the playlist: play the selected track) |
 | `Delete` | Remove the selected track (in the playlist); stops it if it is playing |
-| `Pause`/`Break` | Play / pause — **global** hotkey, works even when the window is not focused |
+| `Pause`/`Break` | Play / pause; **global** hotkey, works even when the window is not focused |
 | `←` / `→` | Seek −5 / +5 sec |
 | `Ctrl+←` / `Ctrl+→` | Seek −30 / +30 sec |
 | `B` | Play backwards (toggle) |
-| `F11` / `F12` (hold) | Fast rewind / forward like a tape recorder — releases back to normal |
+| `F11` / `F12` (hold) | Fast rewind / forward like a tape recorder, releases back to normal |
 | `↑` / `↓` | Navigate the list |
 | `T` / `Shift+T` | Tempo down / up |
 | `Ctrl+T` | Reset tempo to 0 % |
@@ -62,7 +62,7 @@ The player is written entirely by AI, hence the name.
 | `E` | Stop recording |
 | `Alt+F4` | Quit |
 
-> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells — bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it — just like the volume keys. `Ctrl`+the number resets that single band, and `Ctrl+I` flattens everything. The setting persists when you open another file. The two EQ rows are only shown while at least one band is non-zero, and the `Tempo` row only while the tempo isn't 0 %.
+> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells, bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it, just like the volume keys. `Ctrl`+the number resets that single band, and `Ctrl+I` flattens everything. The setting persists when you open another file. The two EQ rows are only shown while at least one band is non-zero, and the `Tempo` row only while the tempo isn't 0 %.
 
 > The list (`SysListView32`) is subclassed and gets focus automatically. Keys it doesn't use itself (e.g. arrow up/down) are passed on, so you can freely navigate the list.
 
@@ -75,7 +75,7 @@ shortcuts and an uninstaller, and registers the audio formats so they can be ope
 Explorer's **Open with** menu. The BASS DLLs are bundled in.
 
 Format plugins for Opus, FLAC, AAC, Apple Lossless, WavPack, Monkey's Audio, DSD and Speex are
-offered on the installer's components page — none are ticked by default, so pick the ones
+offered on the installer's components page; none are ticked by default, so pick the ones
 you want. The portable `.zip` simply ships them all in its `plugins\` folder.
 
 ## How to build
@@ -123,5 +123,5 @@ likelier to succeed on Windows 95/98 than on NT 4.0.
 
 - The stream is created as a decoder channel (`BASS_STREAM_DECODE`) and wrapped in `BASS_FX_TempoCreate`, so the tempo can be changed live. `BASS_FX_FREESOURCE` ensures the source is freed automatically.
 - The BPM row is hidden until you press `Ctrl+B`, and nothing is analysed while it is hidden. BASS_FX always returns its best guess, so material without a clear beat gives a meaningless number rather than nothing - which is why it is off by default. `Ctrl+Shift+B` hides it again. The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Pressing `Ctrl+B` again analyses from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection.
-- The recording captures exactly the samples the playing channel delivers — including the tempo change — because the encoder is attached to the tempo stream.
-- Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format — the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
+- The recording captures exactly the samples the playing channel delivers, including the tempo change, because the encoder is attached to the tempo stream.
+- Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format; the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
