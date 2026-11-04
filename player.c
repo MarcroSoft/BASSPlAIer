@@ -21,9 +21,22 @@
  *   Q / Shift+Q Frequency down / up (100 Hz);   Ctrl+Q reset to native
  *   Backspace   Reset tempo, pitch and frequency
  *   C           Command box (e.g. 30, +5, t75, p6, q44100, v150)
+<<<<<<< Updated upstream
  *   Ctrl+B      Show the BPM and detect it from the current position
  *   Ctrl+Shift+B  Hide the BPM row again
  *   R           Start recording what is playing (-> Music\BASS PlAIer)
+=======
+<<<<<<< HEAD
+ *   M           Mono (downmix both channels, toggle)
+ *   K           Add a bookmark at the current position
+ *   Ctrl+B      Detect the BPM again from the current position
+ *   R           Start recording what is playing (-> recording.wav)
+=======
+ *   Ctrl+B      Show the BPM and detect it from the current position
+ *   Ctrl+Shift+B  Hide the BPM row again
+ *   R           Start recording what is playing (-> Music\BASS PlAIer)
+>>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
+>>>>>>> Stashed changes
  *   E           Stop recording
  *   1..9, 0          Cut EQ band 1 dB (1 = 80 Hz .. 0 = 14 kHz)  [10-band EQ]
  *   Shift+1..9, 0    Boost that EQ band 1 dB
@@ -31,6 +44,10 @@
  *   I / Shift+I      Cut / boost all EQ bands 1 dB
  *   Ctrl+I           Reset all EQ bands to flat
  *   Alt+F4         Quit
+ *
+ * Everything is also reachable from the menu bar (File, Play, Sound,
+ * Bookmarks, Record, Help); bookmarks are kept in bookmarks.txt next to
+ * the exe, so they survive a restart.
  *
  * Build with MinGW-w64 (see Makefile / build.bat).
  */
@@ -56,6 +73,33 @@
 #define PLAYLIST_W  200                /* width of the playlist pane (px) */
 #define WM_APP_TRACKEND (WM_APP + 1)   /* posted when the playing track ends */
 
+/* ---- bookmarks ---- */
+#define BM_MAX        64               /* most bookmarks we keep */
+#define BM_FILE       "bookmarks.txt"  /* saved next to the exe */
+#define BM_MENU_FIXED 4                /* fixed items above the bookmark list */
+
+/* ---- menu command ids ----
+ * Every item does exactly what the matching key does, so the menu is a
+ * discoverable copy of the keyboard rather than a second code path. */
+enum {
+    IDM_OPEN = 2000, IDM_ADD, IDM_REMOVE, IDM_CLEAR, IDM_EXIT,
+    IDM_PLAY, IDM_RESTART, IDM_PREV, IDM_NEXT, IDM_REVERSE,
+    IDM_BACK5, IDM_FWD5, IDM_BACK30, IDM_FWD30, IDM_GOTO, IDM_BPM,
+    IDM_MONO,
+    IDM_TEMPO_DN, IDM_TEMPO_UP, IDM_TEMPO_RST,
+    IDM_PITCH_DN, IDM_PITCH_UP, IDM_PITCH_RST,
+    IDM_FREQ_DN,  IDM_FREQ_UP,  IDM_FREQ_RST,
+    IDM_VOL_DN,   IDM_VOL_UP,   IDM_VOL_RST,
+    IDM_EQ_ALL_DN, IDM_EQ_ALL_UP, IDM_EQ_ALL_RST,
+    IDM_RESET_ALL,
+    IDM_REC_START, IDM_REC_STOP,
+    IDM_BM_ADD, IDM_BM_CLEAR,
+    IDM_HELP_KEYS, IDM_ABOUT
+};
+#define IDM_BM_FIRST      2200   /* + n: jump to bookmark n */
+#define IDM_BM_DEL_FIRST  2300   /* + n: remove bookmark n */
+#define IDM_EQ_FIRST      2400   /* + band*3 + (0 cut, 1 boost, 2 reset) */
+
 /* ---- global state ---- */
 static HWND      g_hMain   = NULL;     /* main window */
 static HWND      g_hList   = NULL;     /* SysListView32 (status) */
@@ -77,8 +121,19 @@ static BOOL      g_rec     = FALSE;    /* recording right now? */
 static char      g_file[MAX_PATH] = "";
 static char      g_recFile[MAX_PATH] = "";  /* current recording filename */
 static float     g_bpm     = 0.0f;     /* BPM of the source, 0 = not known */
+static BOOL      g_mono    = FALSE;    /* downmix to mono? (kept across files) */
+static HDSP      g_monoDsp = 0;        /* the downmix DSP on the stream */
 static volatile LONG g_bpmGen  = 0;    /* id of the newest BPM scan */
 static volatile LONG g_bpmBusy = 0;    /* number of scans running */
+
+/* ---- bookmarks: a named position in a file ---- */
+typedef struct {
+    char   path[MAX_PATH];
+    char   name[64];
+    double pos;                        /* seconds on the file's own timeline */
+} BOOKMARK;
+static BOOKMARK g_bm[BM_MAX];
+static int      g_bmCount = 0;
 
 /* ---- playlist ---- */
 static char    (*g_plFiles)[MAX_PATH] = NULL;  /* full paths, grows on demand */
@@ -100,7 +155,7 @@ static const float g_eqFreq[EQ_BANDS] = {
 /* ---- ListView rows ---- */
 enum {
     ROW_FILE = 0, ROW_STATUS, ROW_POS, ROW_REMAIN, ROW_LEN,
-    ROW_TEMPO, ROW_PITCH, ROW_FREQ, ROW_BPM, ROW_VOL, ROW_REC,
+    ROW_TEMPO, ROW_PITCH, ROW_FREQ, ROW_BPM, ROW_VOL, ROW_MONO, ROW_REC,
     ROW_EQ_LO,                     /* EQ bands 1-5 on one row, 6-10 on the next */
     ROW_EQ_HI,
     ROW_COUNT
@@ -109,7 +164,7 @@ enum {
 /* column-0 label for each logical row */
 static const char *g_rowName[ROW_COUNT] = {
     "File:", "Status:", "Position:", "Remaining:", "Length:",
-    "Speed:", "Pitch:", "Frequency:", "BPM:", "Volume:", "Recording:",
+    "Speed:", "Pitch:", "Frequency:", "BPM:", "Volume:", "Mono:", "Recording:",
     "Equalizer 1:", "Equalizer 2:"
 };
 /* current listview index of each logical row, or -1 while hidden */
@@ -117,7 +172,15 @@ static int  g_rowIdx[ROW_COUNT];
 static BOOL g_showTempo = FALSE;   /* Tempo row hidden while tempo == 0 % */
 static BOOL g_showPitch = FALSE;   /* Pitch row hidden while pitch == 0 */
 static BOOL g_showEq    = FALSE;   /* EQ rows hidden while every band == 0 dB */
+<<<<<<< Updated upstream
 static BOOL g_showBpm   = FALSE;   /* BPM row hidden until Ctrl+B asks for it */
+=======
+<<<<<<< HEAD
+static BOOL g_showMono  = FALSE;   /* Mono row hidden while playing in stereo */
+=======
+static BOOL g_showBpm   = FALSE;   /* BPM row hidden until Ctrl+B asks for it */
+>>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
+>>>>>>> Stashed changes
 
 static BOOL handleKey(HWND hwnd, WPARAM key);   /* forward */
 static void cueStop(void);                      /* forward (used by ListProc) */
@@ -224,7 +287,15 @@ static void rebuildRows(void)
     for (int r = 0; r < ROW_COUNT; r++) {
         if (r == ROW_TEMPO && !g_showTempo) continue;
         if (r == ROW_PITCH && !g_showPitch) continue;
+<<<<<<< Updated upstream
         if (r == ROW_BPM && !g_showBpm) continue;
+=======
+<<<<<<< HEAD
+        if (r == ROW_MONO  && !g_showMono)  continue;
+=======
+        if (r == ROW_BPM && !g_showBpm) continue;
+>>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
+>>>>>>> Stashed changes
         if ((r == ROW_EQ_LO || r == ROW_EQ_HI) && !g_showEq) continue;
         LVITEM it = {0};
         it.mask = LVIF_TEXT;
@@ -294,6 +365,23 @@ static void buildList(HWND hwnd)
     SetFocus(g_hPlist);
 }
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+/* ---- full path of a file next to the exe ----
+ * Like loadPlugins below, this deliberately ignores the working directory:
+ * opening a file from Explorer starts us in the folder of that file. */
+static BOOL exeFile(char *out, size_t n, const char *leaf)
+{
+    char dir[MAX_PATH];
+    DWORD got = GetModuleFileName(NULL, dir, MAX_PATH);
+    if (got == 0 || got >= MAX_PATH) return FALSE;
+    char *slash = strrchr(dir, '\\');
+    if (!slash) return FALSE;
+    *slash = 0;                     /* strip the exe name */
+    snprintf(out, n, "%s\\%s", dir, leaf);
+=======
+>>>>>>> Stashed changes
 /* ---- helper: folder the exe lives in (dir is a MAX_PATH buffer) ---- */
 static BOOL exeDir(char *dir)
 {
@@ -302,6 +390,10 @@ static BOOL exeDir(char *dir)
     char *slash = strrchr(dir, '\\');
     if (!slash) return FALSE;
     *slash = 0;                     /* strip the exe name */
+<<<<<<< Updated upstream
+=======
+>>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
+>>>>>>> Stashed changes
     return TRUE;
 }
 
@@ -441,6 +533,7 @@ static void closeStream(void)
         g_stream = 0;
         g_revStream = 0;             /* freed together with the stream */
         g_eqFx = 0;                  /* effect is freed together with the stream */
+        g_monoDsp = 0;               /* DSP is freed together with the stream */
         g_cueing = FALSE;
     }
 }
@@ -509,6 +602,52 @@ static BOOL eqActive(void)
     return FALSE;
 }
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+/* ---- mono downmix ----
+ * A DSP on the playing stream averages the channels of every frame and
+ * writes the result back to all of them, so the same signal comes out of
+ * both speakers. The chain is 32-bit float (see playFile), so the samples
+ * can be averaged as they are.
+ * user = the channel count, which cannot change while the stream lives. */
+static void CALLBACK monoProc(HDSP handle, DWORD channel, void *buffer,
+                              DWORD length, void *user)
+{
+    (void)handle; (void)channel;
+    int chans = (int)(DWORD_PTR)user;
+    float *p = (float *)buffer;
+    DWORD frames = length / (DWORD)(sizeof(float) * chans);
+
+    for (DWORD f = 0; f < frames; f++, p += chans) {
+        float sum = 0.0f;
+        for (int c = 0; c < chans; c++) sum += p[c];
+        sum /= (float)chans;
+        for (int c = 0; c < chans; c++) p[c] = sum;
+    }
+}
+
+/* attach or remove the downmix, following g_mono */
+static void setupMono(void)
+{
+    if (g_monoDsp && g_stream) BASS_ChannelRemoveDSP(g_stream, g_monoDsp);
+    g_monoDsp = 0;
+    if (!g_stream || !g_mono) return;
+
+    BASS_CHANNELINFO info;
+    if (!BASS_ChannelGetInfo(g_stream, &info)) return;
+    /* nothing to mix on a mono file, and the callback assumes float samples */
+    if (info.chans < 2 || !(info.flags & BASS_SAMPLE_FLOAT)) return;
+    g_monoDsp = BASS_ChannelSetDSP(g_stream, monoProc,
+                                   (void *)(DWORD_PTR)info.chans, 0);
+}
+
+static void toggleMono(void)
+{
+    g_mono = !g_mono;
+    setupMono();           /* takes effect on the next buffer */
+=======
+>>>>>>> Stashed changes
 /* ---- anti-alias filter of the tempo stream ----
  * BASS_FX runs everything through SoundTouch's anti-alias filter, even at
  * rate 1. Its taps are rounded with +0.5 but never truncated in the float
@@ -530,6 +669,10 @@ static void CALLBACK onSlideEnd(HSYNC handle, DWORD channel, DWORD data, void *u
 {
     (void)handle; (void)channel; (void)data; (void)user;
     updateAAFilter();
+<<<<<<< Updated upstream
+=======
+>>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
+>>>>>>> Stashed changes
 }
 
 /* ---- playlist handling ---- */
@@ -585,6 +728,17 @@ static void plRemove(int idx)
     } else if (g_plCur > idx) {
         g_plCur--;
     }
+}
+
+/* throw the whole playlist away (and whatever is playing from it) */
+static void plClear(void)
+{
+    closeStream();
+    g_file[0] = 0;
+    g_plCur = -1;
+    g_plCount = 0;
+    ListView_DeleteAllItems(g_hPlist);
+    updateList();
 }
 
 /* the playing track reached its end (posted from the BASS sync thread) */
@@ -643,6 +797,7 @@ static BOOL playFile(HWND hwnd, const char *path)
     /* switch the AA filter off again once a cue glide back to normal is over */
     BASS_ChannelSetSync(g_stream, BASS_SYNC_SLIDE, 0, onSlideEnd, NULL);
     setupEq();                 /* 10-band EQ (reapplies current gains) */
+    setupMono();               /* mono downmix, if it is switched on */
     /* advance to the next playlist track when this one ends */
     BASS_ChannelSetSync(g_stream, BASS_SYNC_END, 0, onTrackEnd, NULL);
     BASS_ChannelPlay(g_stream, FALSE);
@@ -666,9 +821,10 @@ static void plPlay(HWND hwnd, int idx)
     updateList();
 }
 
-/* file dialog: the chosen files are appended to the playlist and the
- * first of them starts playing */
-static void openFileDialog(HWND hwnd)
+/* file dialog: the chosen files are appended to the playlist; with play
+ * set, the first of them also starts playing (the menu can queue without
+ * interrupting what is on) */
+static void openFiles(HWND hwnd, BOOL play)
 {
     static char buf[32768];    /* room for many selected files */
     buf[0] = 0;
@@ -695,7 +851,7 @@ static void openFileDialog(HWND hwnd)
     } else {
         first = plAdd(buf);    /* single file: buf is the full path */
     }
-    if (first >= 0) plPlay(hwnd, first);
+    if (first >= 0 && play) plPlay(hwnd, first);
 }
 
 /* ---- seek relative ---- */
@@ -907,10 +1063,13 @@ static void updateList(void)
     BOOL wantTempo = (g_tempo != 0.0f);
     BOOL wantPitch = (g_pitch != 0.0f);
     BOOL wantEq    = eqActive();
-    if (wantTempo != g_showTempo || wantPitch != g_showPitch || wantEq != g_showEq) {
+    BOOL wantMono  = g_mono;
+    if (wantTempo != g_showTempo || wantPitch != g_showPitch ||
+        wantEq != g_showEq || wantMono != g_showMono) {
         g_showTempo = wantTempo;
         g_showPitch = wantPitch;
         g_showEq    = wantEq;
+        g_showMono  = wantMono;
         rebuildRows();
     }
 
@@ -983,6 +1142,11 @@ static void updateList(void)
         lvSetText(ROW_BPM, "-");
         lvSetText(ROW_VOL, "100 %");
     }
+    /* the downmix cannot do anything with a file that is already mono */
+    if (g_mono)
+        lvSetText(ROW_MONO,
+                  (g_stream && !g_monoDsp) ? "on (nothing to mix down)" : "on");
+
     if (g_rec) {
         char rb[MAX_PATH + 8];
         snprintf(rb, sizeof(rb), "YES -> %s", g_recFile);
@@ -1030,7 +1194,8 @@ static LRESULT CALLBACK InputProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProc(h, m, w, l);
 }
 
-static BOOL inputBox(HWND parent, const char *prompt, char *out, int outlen)
+static BOOL inputBox(HWND parent, const char *title, const char *prompt,
+                     const char *init, char *out, int outlen)
 {
     static BOOL reg = FALSE;
     HINSTANCE hi = GetModuleHandle(NULL);
@@ -1047,7 +1212,7 @@ static BOOL inputBox(HWND parent, const char *prompt, char *out, int outlen)
     g_inDone = g_inOk = FALSE; g_inText[0] = 0;
 
     RECT pr; GetWindowRect(parent, &pr);
-    HWND dlg = CreateWindowEx(WS_EX_DLGMODALFRAME, "InputBox", "Enter command:",
+    HWND dlg = CreateWindowEx(WS_EX_DLGMODALFRAME, "InputBox", title,
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         pr.left + 50, pr.top + 60, 300, 150, parent, NULL, hi, NULL);
 
@@ -1067,6 +1232,11 @@ static BOOL inputBox(HWND parent, const char *prompt, char *out, int outlen)
     SendMessage(ed, WM_SETFONT, (WPARAM)font, TRUE);
     SendMessage(ok, WM_SETFONT, (WPARAM)font, TRUE);
     SendMessage(ca, WM_SETFONT, (WPARAM)font, TRUE);
+
+    if (init && *init) {
+        SetWindowText(ed, init);       /* offer a value to edit or overtype */
+        SendMessage(ed, EM_SETSEL, 0, -1);
+    }
 
     EnableWindow(parent, FALSE);
     ShowWindow(dlg, SW_SHOW);
@@ -1106,7 +1276,8 @@ static void runCommand(HWND hwnd)
 {
     if (!g_stream) return;
     char buf[64];
-    if (!inputBox(hwnd, "Enter command:", buf, sizeof(buf)))
+    if (!inputBox(hwnd, "Enter command:", "Enter command:", NULL,
+                  buf, sizeof(buf)))
         return;
     const char *s = buf;
     while (*s == ' ') s++;
@@ -1124,6 +1295,426 @@ static void runCommand(HWND hwnd)
         seekMinutes(atof(s));     /* bare number -> absolute minute */
         break;
     }
+}
+
+
+/* ---- bookmarks ----
+ * A bookmark is a named position in a file. The list lives in a plain
+ * tab-separated text file next to the exe, one line per bookmark, so it
+ * can also be edited by hand:  seconds<TAB>name<TAB>file
+ * Positions are kept on the file's own timeline (like seeking), so they
+ * stay correct whatever tempo or frequency is set when they are used. */
+static void bmLoad(void)
+{
+    char path[MAX_PATH];
+    if (!exeFile(path, sizeof(path), BM_FILE)) return;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+
+    char line[MAX_PATH + 128];
+    g_bmCount = 0;
+    while (g_bmCount < BM_MAX && fgets(line, sizeof(line), f)) {
+        char *nl = strpbrk(line, "\r\n");
+        if (nl) *nl = 0;
+        if (!line[0] || line[0] == '#') continue;      /* blank or comment */
+        char *tab1 = strchr(line, '\t');
+        if (!tab1) continue;
+        *tab1++ = 0;
+        char *tab2 = strchr(tab1, '\t');
+        if (!tab2) continue;
+        *tab2++ = 0;
+        if (!*tab2) continue;                          /* no filename */
+
+        BOOKMARK *b = &g_bm[g_bmCount];
+        b->pos = atof(line);
+        if (b->pos < 0.0) b->pos = 0.0;
+        lstrcpyn(b->name, *tab1 ? tab1 : tab2, sizeof(b->name));
+        lstrcpyn(b->path, tab2, MAX_PATH);
+        g_bmCount++;
+    }
+    fclose(f);
+}
+
+static void bmSave(void)
+{
+    char path[MAX_PATH];
+    if (!exeFile(path, sizeof(path), BM_FILE)) return;
+    FILE *f = fopen(path, "w");
+    if (!f) return;      /* read-only folder: bookmarks just won't persist */
+    fputs("# BASS PlAIer bookmarks: seconds<TAB>name<TAB>file\n", f);
+    for (int i = 0; i < g_bmCount; i++)
+        fprintf(f, "%.3f\t%s\t%s\n", g_bm[i].pos, g_bm[i].name, g_bm[i].path);
+    fclose(f);
+}
+
+static void rebuildBookmarkMenu(void);   /* forward (menu code below) */
+
+/* bookmark the position we are playing, under a name the user can edit */
+static void bmAdd(HWND hwnd)
+{
+    if (!g_stream || !g_file[0]) return;
+    if (g_bmCount >= BM_MAX) {
+        MessageBox(hwnd, "There is no room for more bookmarks.",
+                   APP_TITLE, MB_ICONINFORMATION);
+        return;
+    }
+
+    double pos = curPos();
+    char t[32];
+    fmtTime(pos, t, sizeof(t));
+    const char *base = strrchr(g_file, '\\');
+    char suggest[64], name[64];
+    /* time first: with a long filename it is the name that gets cut */
+    snprintf(suggest, sizeof(suggest), "%s  %s", t, base ? base + 1 : g_file);
+    if (!inputBox(hwnd, "Add bookmark", "Name:", suggest, name, sizeof(name)))
+        return;
+    /* a tab would break the file format, an empty name hides the entry */
+    for (char *p = name; *p; p++) if (*p == '\t') *p = ' ';
+    if (!name[0]) lstrcpyn(name, suggest, sizeof(name));
+
+    BOOKMARK *b = &g_bm[g_bmCount++];
+    lstrcpyn(b->path, g_file, MAX_PATH);
+    lstrcpyn(b->name, name, sizeof(b->name));
+    b->pos = pos;
+    bmSave();
+    rebuildBookmarkMenu();
+}
+
+static void bmRemove(int idx)
+{
+    if (idx < 0 || idx >= g_bmCount) return;
+    memmove(&g_bm[idx], &g_bm[idx + 1],
+            (size_t)(g_bmCount - idx - 1) * sizeof(g_bm[0]));
+    g_bmCount--;
+    bmSave();
+    rebuildBookmarkMenu();
+}
+
+static void bmClear(HWND hwnd)
+{
+    if (g_bmCount == 0) return;
+    if (MessageBox(hwnd, "Remove all bookmarks?", APP_TITLE,
+                   MB_OKCANCEL | MB_ICONQUESTION) != IDOK) return;
+    g_bmCount = 0;
+    bmSave();
+    rebuildBookmarkMenu();
+}
+
+/* play a bookmark: its file is loaded (and queued) if it isn't on already */
+static void bmGo(HWND hwnd, int idx)
+{
+    if (idx < 0 || idx >= g_bmCount) return;
+    double pos = g_bm[idx].pos;                /* copies: plPlay may remove */
+    char path[MAX_PATH];                       /* the entry from under us    */
+    lstrcpyn(path, g_bm[idx].path, MAX_PATH);
+
+    if (!g_stream || lstrcmpi(g_file, path) != 0) {
+        int at = -1;
+        for (int i = 0; i < g_plCount; i++)
+            if (lstrcmpi(g_plFiles[i], path) == 0) { at = i; break; }
+        if (at < 0) at = plAdd(path);          /* not queued yet: queue it */
+        if (at < 0) return;
+        plPlay(hwnd, at);
+        if (!g_stream) return;                 /* the file could not be played */
+    }
+    BASS_ChannelSetPosition(g_stream,
+        BASS_ChannelSeconds2Bytes(g_stream, pos), BASS_POS_BYTE);
+    /* a bookmark plays: pick it up again if the track was paused or had
+     * run to its end */
+    if (BASS_ChannelIsActive(g_stream) != BASS_ACTIVE_PLAYING)
+        BASS_ChannelPlay(g_stream, FALSE);
+    updateList();
+}
+
+/* ---- menu bar ----
+ * Every item does what the matching key does, so the menu is a
+ * discoverable copy of the keyboard rather than a second code path. */
+static HMENU g_bmMenu    = NULL;   /* the Bookmarks popup (rebuilt on change) */
+static HMENU g_bmDelMenu = NULL;   /* its Remove submenu */
+
+/* label for one EQ band, e.g. "80 Hz" or "14 kHz" */
+static void eqBandLabel(int band, char *out, size_t n)
+{
+    if (g_eqFreq[band] >= 1000.0f)
+        snprintf(out, n, "%g kHz", g_eqFreq[band] / 1000.0);
+    else
+        snprintf(out, n, "%g Hz", (double)g_eqFreq[band]);
+}
+
+/* the bookmark list itself: one item to play it, one under Remove to
+ * delete it. Called whenever the list changes. */
+static void rebuildBookmarkMenu(void)
+{
+    if (!g_bmMenu || !g_bmDelMenu) return;
+
+    while (GetMenuItemCount(g_bmMenu) > BM_MENU_FIXED)
+        DeleteMenu(g_bmMenu, BM_MENU_FIXED, MF_BYPOSITION);
+    while (GetMenuItemCount(g_bmDelMenu) > 0)
+        DeleteMenu(g_bmDelMenu, 0, MF_BYPOSITION);
+
+    if (g_bmCount == 0) {
+        AppendMenu(g_bmMenu,    MF_STRING | MF_GRAYED, 0, "(none yet)");
+        AppendMenu(g_bmDelMenu, MF_STRING | MF_GRAYED, 0, "(none yet)");
+        return;
+    }
+    for (int i = 0; i < g_bmCount; i++) {
+        char label[160], t[32];
+        fmtTime(g_bm[i].pos, t, sizeof(t));
+        /* the first nine get a number to type */
+        if (i < 9)
+            snprintf(label, sizeof(label), "&%d  %s\t%s", i + 1, g_bm[i].name, t);
+        else
+            snprintf(label, sizeof(label), "%d  %s\t%s", i + 1, g_bm[i].name, t);
+        AppendMenu(g_bmMenu, MF_STRING, IDM_BM_FIRST + i, label);
+        snprintf(label, sizeof(label), "%s\t%s", g_bm[i].name, t);
+        AppendMenu(g_bmDelMenu, MF_STRING, IDM_BM_DEL_FIRST + i, label);
+    }
+}
+
+static void buildMenu(HWND hwnd)
+{
+    HMENU bar = CreateMenu();
+
+    HMENU file = CreatePopupMenu();
+    AppendMenu(file, MF_STRING, IDM_OPEN,   "&Open files...\tO");
+    AppendMenu(file, MF_STRING, IDM_ADD,    "&Add to playlist...");
+    AppendMenu(file, MF_SEPARATOR, 0, NULL);
+    AppendMenu(file, MF_STRING, IDM_REMOVE, "&Remove selected track\tDel");
+    AppendMenu(file, MF_STRING, IDM_CLEAR,  "&Clear playlist");
+    AppendMenu(file, MF_SEPARATOR, 0, NULL);
+    AppendMenu(file, MF_STRING, IDM_EXIT,   "E&xit\tAlt+F4");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)file, "&File");
+
+    HMENU play = CreatePopupMenu();
+    AppendMenu(play, MF_STRING, IDM_PLAY,    "&Play / Pause\tSpace");
+    AppendMenu(play, MF_STRING, IDM_RESTART, "Play from the &start\tEnter");
+    AppendMenu(play, MF_SEPARATOR, 0, NULL);
+    AppendMenu(play, MF_STRING, IDM_PREV,    "Pre&vious track");
+    AppendMenu(play, MF_STRING, IDM_NEXT,    "&Next track");
+    AppendMenu(play, MF_SEPARATOR, 0, NULL);
+    AppendMenu(play, MF_STRING, IDM_REVERSE, "Play &backwards\tB");
+    AppendMenu(play, MF_SEPARATOR, 0, NULL);
+    AppendMenu(play, MF_STRING, IDM_BACK5,   "Back 5 seconds\tLeft");
+    AppendMenu(play, MF_STRING, IDM_FWD5,    "Forward 5 seconds\tRight");
+    AppendMenu(play, MF_STRING, IDM_BACK30,  "Back 30 seconds\tCtrl+Left");
+    AppendMenu(play, MF_STRING, IDM_FWD30,   "Forward 30 seconds\tCtrl+Right");
+    AppendMenu(play, MF_STRING, IDM_GOTO,    "&Go to / command...\tC");
+    AppendMenu(play, MF_SEPARATOR, 0, NULL);
+    AppendMenu(play, MF_STRING, IDM_BPM,     "Detect B&PM again\tCtrl+B");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)play, "&Play");
+
+    HMENU tempo = CreatePopupMenu();
+    AppendMenu(tempo, MF_STRING, IDM_TEMPO_DN,  "&Slower\tT");
+    AppendMenu(tempo, MF_STRING, IDM_TEMPO_UP,  "&Faster\tShift+T");
+    AppendMenu(tempo, MF_STRING, IDM_TEMPO_RST, "&Reset\tCtrl+T");
+
+    HMENU pitch = CreatePopupMenu();
+    AppendMenu(pitch, MF_STRING, IDM_PITCH_DN,  "&Down a semitone\tP");
+    AppendMenu(pitch, MF_STRING, IDM_PITCH_UP,  "&Up a semitone\tShift+P");
+    AppendMenu(pitch, MF_STRING, IDM_PITCH_RST, "&Reset\tCtrl+P");
+
+    HMENU freq = CreatePopupMenu();
+    AppendMenu(freq, MF_STRING, IDM_FREQ_DN,  "&Down 100 Hz\tQ");
+    AppendMenu(freq, MF_STRING, IDM_FREQ_UP,  "&Up 100 Hz\tShift+Q");
+    AppendMenu(freq, MF_STRING, IDM_FREQ_RST, "&Native rate\tCtrl+Q");
+
+    HMENU vol = CreatePopupMenu();
+    AppendMenu(vol, MF_STRING, IDM_VOL_DN,  "&Down\tV");
+    AppendMenu(vol, MF_STRING, IDM_VOL_UP,  "&Up\tShift+V");
+    AppendMenu(vol, MF_STRING, IDM_VOL_RST, "&Reset (100 %)\tCtrl+V");
+
+    HMENU eq = CreatePopupMenu();
+    AppendMenu(eq, MF_STRING, IDM_EQ_ALL_DN,  "&Cut all bands\tI");
+    AppendMenu(eq, MF_STRING, IDM_EQ_ALL_UP,  "&Boost all bands\tShift+I");
+    AppendMenu(eq, MF_STRING, IDM_EQ_ALL_RST, "&Flat\tCtrl+I");
+    AppendMenu(eq, MF_SEPARATOR, 0, NULL);
+    for (int b = 0; b < EQ_BANDS; b++) {
+        /* one submenu per band; the number keys do the same thing, so the
+         * key is shown next to the band like any other shortcut */
+        char band[32], label[64];
+        eqBandLabel(b, band, sizeof(band));
+        HMENU one = CreatePopupMenu();
+        AppendMenu(one, MF_STRING, IDM_EQ_FIRST + b * 3 + 0, "&Cut 1 dB");
+        AppendMenu(one, MF_STRING, IDM_EQ_FIRST + b * 3 + 1, "&Boost 1 dB");
+        AppendMenu(one, MF_STRING, IDM_EQ_FIRST + b * 3 + 2, "&Reset");
+        snprintf(label, sizeof(label), "%s\t%c", band,
+                 b == EQ_BANDS - 1 ? '0' : (char)('1' + b));
+        AppendMenu(eq, MF_POPUP, (UINT_PTR)one, label);
+    }
+
+    HMENU sound = CreatePopupMenu();
+    AppendMenu(sound, MF_STRING, IDM_MONO, "&Mono\tM");
+    AppendMenu(sound, MF_SEPARATOR, 0, NULL);
+    AppendMenu(sound, MF_POPUP, (UINT_PTR)tempo, "&Tempo");
+    AppendMenu(sound, MF_POPUP, (UINT_PTR)pitch, "&Pitch");
+    AppendMenu(sound, MF_POPUP, (UINT_PTR)freq,  "&Frequency");
+    AppendMenu(sound, MF_POPUP, (UINT_PTR)vol,   "&Volume");
+    AppendMenu(sound, MF_POPUP, (UINT_PTR)eq,    "&Equalizer");
+    AppendMenu(sound, MF_SEPARATOR, 0, NULL);
+    AppendMenu(sound, MF_STRING, IDM_RESET_ALL,
+               "&Reset tempo, pitch and frequency\tBackspace");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)sound, "&Sound");
+
+    g_bmMenu    = CreatePopupMenu();
+    g_bmDelMenu = CreatePopupMenu();
+    AppendMenu(g_bmMenu, MF_STRING, IDM_BM_ADD, "&Add bookmark here...\tK");
+    AppendMenu(g_bmMenu, MF_POPUP, (UINT_PTR)g_bmDelMenu, "&Remove");
+    AppendMenu(g_bmMenu, MF_STRING, IDM_BM_CLEAR, "Remove a&ll...");
+    AppendMenu(g_bmMenu, MF_SEPARATOR, 0, NULL);   /* BM_MENU_FIXED items */
+    rebuildBookmarkMenu();                         /* then the list itself */
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)g_bmMenu, "&Bookmarks");
+
+    HMENU rec = CreatePopupMenu();
+    AppendMenu(rec, MF_STRING, IDM_REC_START, "&Start recording\tR");
+    AppendMenu(rec, MF_STRING, IDM_REC_STOP,  "S&top recording\tE");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)rec, "&Record");
+
+    HMENU help = CreatePopupMenu();
+    AppendMenu(help, MF_STRING, IDM_HELP_KEYS, "&Keyboard shortcuts");
+    AppendMenu(help, MF_SEPARATOR, 0, NULL);
+    AppendMenu(help, MF_STRING, IDM_ABOUT,     "&About");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)help, "&Help");
+
+    SetMenu(hwnd, bar);
+}
+
+/* grey out what cannot be done right now and tick the toggles */
+static void updateMenuState(HWND hwnd)
+{
+    /* items that do nothing without a loaded track (the EQ and the mono
+     * setting are kept across files, so those stay available) */
+    static const int needStream[] = {
+        IDM_PLAY, IDM_RESTART, IDM_REVERSE, IDM_BACK5, IDM_FWD5,
+        IDM_BACK30, IDM_FWD30, IDM_GOTO, IDM_BPM,
+        IDM_TEMPO_DN, IDM_TEMPO_UP, IDM_TEMPO_RST,
+        IDM_PITCH_DN, IDM_PITCH_UP, IDM_PITCH_RST,
+        IDM_FREQ_DN, IDM_FREQ_UP, IDM_FREQ_RST,
+        IDM_VOL_DN, IDM_VOL_UP, IDM_VOL_RST,
+        IDM_RESET_ALL, IDM_BM_ADD
+    };
+    HMENU bar = GetMenu(hwnd);
+    if (!bar) return;
+
+    UINT on = g_stream ? MF_ENABLED : MF_GRAYED;
+    for (int i = 0; i < (int)(sizeof(needStream) / sizeof(needStream[0])); i++)
+        EnableMenuItem(bar, needStream[i], MF_BYCOMMAND | on);
+
+    int sel = ListView_GetNextItem(g_hPlist, -1, LVNI_SELECTED);
+    EnableMenuItem(bar, IDM_REMOVE, MF_BYCOMMAND |
+        (sel >= 0 ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_CLEAR, MF_BYCOMMAND |
+        (g_plCount > 0 ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_PREV, MF_BYCOMMAND |
+        (g_plCur > 0 ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_NEXT, MF_BYCOMMAND |
+        (g_plCur >= 0 && g_plCur + 1 < g_plCount ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_REC_START, MF_BYCOMMAND |
+        (g_stream && !g_rec ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_REC_STOP, MF_BYCOMMAND |
+        (g_rec ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_BM_CLEAR, MF_BYCOMMAND |
+        (g_bmCount > 0 ? MF_ENABLED : MF_GRAYED));
+
+    CheckMenuItem(bar, IDM_REVERSE, MF_BYCOMMAND |
+        (g_reverse ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(bar, IDM_MONO, MF_BYCOMMAND |
+        (g_mono ? MF_CHECKED : MF_UNCHECKED));
+}
+
+static void showKeys(HWND hwnd)
+{
+    MessageBox(hwnd,
+        "O           Open file(s), added to the playlist\r\n"
+        "Tab         Switch between the playlist and the status list\r\n"
+        "Enter       Play the selected track / play from the start\r\n"
+        "Delete      Remove the selected track\r\n"
+        "Space       Play / pause (Pause/Break works without focus)\r\n"
+        "Left/Right  Seek 5 sec, with Ctrl 30 sec\r\n"
+        "B           Play backwards\r\n"
+        "F11 / F12   Hold for fast rewind / forward\r\n"
+        "M           Mono\r\n"
+        "K           Add a bookmark here\r\n"
+        "T / P / Q   Tempo / pitch / frequency down"
+        " (Shift up, Ctrl reset)\r\n"
+        "V           Volume down (Shift up, Ctrl reset)\r\n"
+        "1..9, 0     Cut an EQ band (Shift boost, Ctrl reset)\r\n"
+        "I           Cut all EQ bands (Shift boost, Ctrl flat)\r\n"
+        "Backspace   Reset tempo, pitch and frequency\r\n"
+        "C           Command box (30, +5, t75, p6, q44100, v150)\r\n"
+        "Ctrl+B      Detect the BPM again from here\r\n"
+        "R / E       Start / stop recording\r\n"
+        "Alt+F4      Quit",
+        "Keyboard shortcuts", MB_OK | MB_ICONINFORMATION);
+}
+
+static void showAbout(HWND hwnd)
+{
+    MessageBox(hwnd,
+        APP_TITLE "\r\n\r\n"
+        "A small player built on BASS, BASS_FX and BASSenc:\r\n"
+        "playlist, tempo, pitch and frequency control, reverse and\r\n"
+        "tape-style cueing, a 10-band equalizer, BPM detection,\r\n"
+        "mono downmix, bookmarks and recording to WAV.",
+        "About " APP_TITLE, MB_OK | MB_ICONINFORMATION);
+}
+
+/* one menu item; the ranges (bookmarks, EQ bands) are handled by the caller */
+static void menuCommand(HWND hwnd, int id)
+{
+    int sel;
+    switch (id) {
+    case IDM_OPEN:    openFiles(hwnd, TRUE);  break;
+    case IDM_ADD:     openFiles(hwnd, FALSE); break;
+    case IDM_REMOVE:
+        sel = ListView_GetNextItem(g_hPlist, -1, LVNI_SELECTED);
+        if (sel >= 0) plRemove(sel);
+        break;
+    case IDM_CLEAR:   plClear(); break;
+    case IDM_EXIT:    PostMessage(hwnd, WM_CLOSE, 0, 0); break;
+
+    case IDM_PLAY:    togglePlay();    break;
+    case IDM_RESTART: playFromStart(); break;
+    case IDM_PREV:    if (g_plCur > 0) plPlay(hwnd, g_plCur - 1); break;
+    case IDM_NEXT:    if (g_plCur >= 0 && g_plCur + 1 < g_plCount)
+                          plPlay(hwnd, g_plCur + 1);
+                      break;
+    case IDM_REVERSE: toggleReverse(); break;
+    case IDM_BACK5:   seekBy(-5.0);    break;
+    case IDM_FWD5:    seekBy(+5.0);    break;
+    case IDM_BACK30:  seekBy(-30.0);   break;
+    case IDM_FWD30:   seekBy(+30.0);   break;
+    case IDM_GOTO:    runCommand(hwnd);       break;
+    case IDM_BPM:     startBpmScan(curPos()); break;
+
+    case IDM_MONO:      toggleMono();        break;
+    case IDM_TEMPO_DN:  changeTempo(-1.0f);  break;
+    case IDM_TEMPO_UP:  changeTempo(+1.0f);  break;
+    case IDM_TEMPO_RST: resetTempo();        break;
+    case IDM_PITCH_DN:  changePitch(-1.0f);  break;
+    case IDM_PITCH_UP:  changePitch(+1.0f);  break;
+    case IDM_PITCH_RST: resetPitch();        break;
+    case IDM_FREQ_DN:   changeFreq(-100.0f); break;
+    case IDM_FREQ_UP:   changeFreq(+100.0f); break;
+    case IDM_FREQ_RST:  resetFreq();         break;
+    case IDM_VOL_DN:    changeVol(-0.01f);   break;
+    case IDM_VOL_UP:    changeVol(+0.01f);   break;
+    case IDM_VOL_RST:   resetVol();          break;
+    case IDM_EQ_ALL_DN:  changeAllEq(-1.0f); break;
+    case IDM_EQ_ALL_UP:  changeAllEq(+1.0f); break;
+    case IDM_EQ_ALL_RST: resetEq();          break;
+    case IDM_RESET_ALL: resetTempo(); resetPitch(); resetFreq(); break;
+
+    case IDM_REC_START: startEncode(hwnd); break;
+    case IDM_REC_STOP:  stopEncode();      break;
+
+    case IDM_BM_ADD:    bmAdd(hwnd);   break;
+    case IDM_BM_CLEAR:  bmClear(hwnd); break;
+
+    case IDM_HELP_KEYS: showKeys(hwnd);  break;
+    case IDM_ABOUT:     showAbout(hwnd); break;
+    default:            return;
+    }
+    updateList();
 }
 
 /* Returns TRUE if the key was used (and should be swallowed),
@@ -1152,12 +1743,14 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
     }
 
     switch (key) {
-    case 'O':       openFileDialog(hwnd); break;
+    case 'O':       openFiles(hwnd, TRUE); break;
     case VK_SPACE:  togglePlay(); break;
     case VK_RETURN: playFromStart(); break;
     case VK_LEFT:   seekBy(ctrl ? -30.0 : -5.0); break;
     case VK_RIGHT:  seekBy(ctrl ? +30.0 : +5.0); break;
     case 'C':       runCommand(hwnd); break;
+    case 'M':       toggleMono(); break;              /* mono on/off */
+    case 'K':       bmAdd(hwnd); break;               /* bookmark here */
     case 'I':       if (ctrl)  resetEq();                       /* Ctrl+I: flatten */
                     else       changeAllEq(shift ? +1.0f : -1.0f);
                     break;                                      /* I down / Shift+I up (all bands) */
@@ -1203,6 +1796,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     switch (msg) {
     case WM_CREATE:
         g_hMain = hwnd;
+        bmLoad();          /* before the menu, which lists the bookmarks */
+        buildMenu(hwnd);
         buildList(hwnd);
         SetTimer(hwnd, ID_TIMER, 200, NULL);
         /* global Pause/Break hotkey: pauses even when we don't have focus */
@@ -1215,6 +1810,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         MoveWindow(g_hList, pw, 0, w - pw, h, TRUE);
         return 0;
     }
+    case WM_COMMAND: {
+        int id = LOWORD(wp);
+        if (id >= IDM_BM_FIRST && id < IDM_BM_FIRST + BM_MAX) {
+            bmGo(hwnd, id - IDM_BM_FIRST);
+        } else if (id >= IDM_BM_DEL_FIRST && id < IDM_BM_DEL_FIRST + BM_MAX) {
+            bmRemove(id - IDM_BM_DEL_FIRST);
+        } else if (id >= IDM_EQ_FIRST && id < IDM_EQ_FIRST + EQ_BANDS * 3) {
+            int band = (id - IDM_EQ_FIRST) / 3;
+            switch ((id - IDM_EQ_FIRST) % 3) {
+            case 0:  changeEqBand(band, -1.0f); break;
+            case 1:  changeEqBand(band, +1.0f); break;
+            default: changeEqBand(band, -g_eqGain[band]); break;  /* to 0 dB */
+            }
+            updateList();
+        } else {
+            menuCommand(hwnd, id);
+        }
+        return 0;
+    }
+    case WM_INITMENU:
+        updateMenuState(hwnd);
+        return 0;
     case WM_NOTIFY: {
         NMHDR *nm = (NMHDR *)lp;
         if (nm->hwndFrom == g_hPlist && nm->code == NM_DBLCLK) {
