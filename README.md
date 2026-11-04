@@ -1,7 +1,8 @@
 ﻿# BASS PlAIer
 
 A minimal native Windows player in C built on **BASS**, **BASS_FX** and **BASSenc**.
-Status is shown in a real `SysListView32`, and everything is controlled from the keyboard.
+Status is shown in a real `SysListView32`, and everything is controlled from the
+keyboard — or from the menu bar, which lists every command with its shortcut.
 
 The player is written entirely by AI, hence the name.
 
@@ -16,13 +17,27 @@ The player is written entirely by AI, hence the name.
   on the command line, or opened via **Open with → BASS PlAIer** (the file
   formats can be registered during the installation process). If the player is already running, the file is handed
   to the running instance instead of starting a new one.
+- Menu bar over the two panes (**File**, **Play**, **Sound**, **Bookmarks**,
+  **Record**, **Help**): every item does what the matching key does and shows
+  that key next to it, so nothing has to be memorised. Items that need a
+  loaded track are greyed out, and `Mono` and `Play backwards` are ticked
+  while they are on. **Help → Keyboard shortcuts** shows the list below.
+- Bookmarks: `K` (or **Bookmarks → Add bookmark here**) saves the position you
+  are at under a name you can edit — the time and the filename are suggested.
+  Picking a bookmark from the menu jumps straight to it, loading and queueing
+  its file first if it is not the one playing. The first nine are reachable by
+  number, and single bookmarks are deleted from **Bookmarks → Remove**.
+- Mono (`M`, or **Sound → Mono**): the channels are averaged and the result is
+  played on both, which is what you want for one-sided recordings or a single
+  speaker. The setting stays on across tracks and is applied to the recording
+  too.
 - Playback via BASS with plugin loading (all `.dll` files in the `plugins\` folder **next to the exe** are loaded with `BASS_PluginLoad`, e.g. `bassflac.dll`, `bassopus.dll`, `bass_aac.dll`).
 - Real-time tempo change with BASS_FX (`BASS_ATTRIB_TEMPO`), without changing the pitch.
 - Reverse playback (`BASS_FX_ReverseCreate`) and tape-recorder-style fast cue/review: hold `F11`/`F12` to scrub backward/forward at speed.
 - Independent pitch shift in semitones (`BASS_ATTRIB_TEMPO_PITCH`) and playback sample-rate / frequency control in 100 Hz steps (`BASS_ATTRIB_TEMPO_FREQ`).
 - Command box (`C`): type `30` to jump to 30 minutes, `+5` / `-3` to seek relative, `t75` to set tempo, `p6` for pitch, `q44100` for frequency, `v150` for volume.
 - 10-band graphic equalizer with BASS_FX (`BASS_FX_BFX_PEAKEQ`) at centres 80, 160, 320, 450, 900 Hz, 1.8, 3.6, 7, 10, 14 kHz. The band gains are also applied to the recording.
-- Optional BPM detection with BASS_FX (`BASS_FX_BPM_DecodeGet`), hidden by default: press `Ctrl+B` to show the row and analyse the track in a background thread. While the row is shown each new track is analysed as it starts, and the reading follows the speed and frequency settings.
+- Optional BPM detection with BASS_FX (`BASS_FX_BPM_DecodeGet`), hidden by default: press `Ctrl+B` to show the row and analyse the track in a background thread. While the row is shown each new track is analysed from its current position, and a hidden row never does any work. The file's own BPM is displayed, and the current speed-adjusted value when tempo/frequency are changed.
 - Recording of what is currently playing to a `.wav` file with BASSenc (`BASS_Encode_Start` / `BASS_Encode_Stop`).
   Recordings are always saved in a `BASS PlAIer` folder inside your **Music** folder
   (`recording_YYYYMMDD_HHMMSS.wav`), no matter where the player was started from. On
@@ -52,6 +67,8 @@ The player is written entirely by AI, hence the name.
 | `Ctrl+Q` | Reset frequency to the file's native rate |
 | `Backspace` | Reset tempo, pitch and frequency at once |
 | `C` | Command box (`30` = go to 30 min, `+5`/`-3` = seek relative, `t75`, `p6`, `q44100`, `v150`) |
+| `M` | Mono on / off (both channels averaged) |
+| `K` | Add a bookmark at the current position |
 | `V` / `Shift+V` | Volume down / up |
 | `Ctrl+V` | Reset volume (100 %) |
 | `1`…`9`, `0` | Cut EQ band 1 dB (`1` = 80 Hz … `0` = 14 kHz); top row or numpad |
@@ -65,7 +82,7 @@ The player is written entirely by AI, hence the name.
 | `E` | Stop recording |
 | `Alt+F4` | Quit |
 
-> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells, bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz … `0` = 14 kHz): press it to cut that band, or `Shift`+the number to boost it, just like the volume keys. `Ctrl`+the number resets that single band, and `Ctrl+I` flattens everything. The setting persists when you open another file. The two EQ rows are only shown while at least one band is non-zero, and the `Tempo` row only while the tempo isn't 0 %.
+> **Equalizer:** the two `EQ …` rows show all 10 bands as `freq:gain` cells, bands 1-5 (80-900 Hz) on the first row, 6-10 (1.8-14 kHz) on the second. Each band has its own number key (`1` = 80 Hz, `0` = 14 kHz), and the next row keeps the values visible as you tweak them.
 
 > The list (`SysListView32`) is subclassed and gets focus automatically. Keys it doesn't use itself (e.g. arrow up/down) are passed on, so you can freely navigate the list.
 
@@ -125,6 +142,8 @@ likelier to succeed on Windows 95/98 than on NT 4.0.
 ## Notes
 
 - The stream is created as a decoder channel (`BASS_STREAM_DECODE`) and wrapped in `BASS_FX_TempoCreate`, so the tempo can be changed live. `BASS_FX_FREESOURCE` ensures the source is freed automatically.
-- The BPM row is hidden until you press `Ctrl+B`, and nothing is analysed while it is hidden. BASS_FX always returns its best guess, so material without a clear beat gives a meaningless number rather than nothing - which is why it is off by default. `Ctrl+Shift+B` hides it again. The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Pressing `Ctrl+B` again analyses from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection.
-- The recording captures exactly the samples the playing channel delivers, including the tempo change, because the encoder is attached to the tempo stream.
-- Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format; the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
+- The BPM row is hidden until you press `Ctrl+B`, and nothing is analysed while it is hidden. BASS_FX always returns its best guess, so material without a clear beat gives a meaningless number rather than nothing. `Ctrl+Shift+B` hides it again. The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Press `Ctrl+B` to analyse again from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection.
+- Mono is a DSP callback on the playing stream (`BASS_ChannelSetDSP`) that averages the channels of every frame and writes the average back to all of them. The chain runs in float, so the samples are averaged as they are, and because it sits on the stream the recording gets the same signal. A file that is already mono needs nothing, and the `Mono:` row says so.
+- Bookmarks live in `bookmarks.txt` next to the exe, one line per bookmark as `seconds<TAB>name<TAB>file`, so the list can be edited or copied by hand. It is written whenever a bookmark is added or removed, and read at startup (up to 64 bookmarks; a read-only folder simply means they do not persist). Positions are stored on the file's own timeline, so they stay correct whatever tempo or frequency is set when they are used.
+- The recording captures exactly the samples the playing channel delivers — including the tempo change — because the encoder is attached to the tempo stream.
+- Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format — the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
