@@ -163,6 +163,7 @@ Section "Uninstall"
   Delete "$INSTDIR\bass_fx.dll"
   Delete "$INSTDIR\bassenc.dll"
   Delete "$INSTDIR\README.html"
+  Delete "$INSTDIR\bookmarks.txt"   ; written by the player when bookmarks are saved
   Delete "$INSTDIR\Uninstall.exe"
 
   ; only the plugins we shipped; RMDir without /r leaves the folder alone if
