@@ -2,7 +2,7 @@
 
 A minimal native Windows player in C built on **BASS**, **BASS_FX** and **BASSenc**.
 Status is shown in a real `SysListView32`, and everything is controlled from the
-keyboard — or from the menu bar, which lists every command with its shortcut.
+keyboard, or from the menu bar, which lists every command with its shortcut.
 
 The player is written entirely by AI, hence the name.
 
@@ -23,7 +23,7 @@ The player is written entirely by AI, hence the name.
   loaded track are greyed out, and `Mono` and `Play backwards` are ticked
   while they are on. **Help → Keyboard shortcuts** shows the list below.
 - Bookmarks: `K` (or **Bookmarks → Add bookmark here**) saves the position you
-  are at under a name you can edit — the time and the filename are suggested.
+  are at under a name you can edit; the time and the filename are suggested.
   Picking a bookmark from the menu jumps straight to it, loading and queueing
   its file first if it is not the one playing. The first nine are reachable by
   number, and single bookmarks are deleted from **Bookmarks → Remove**.
@@ -142,13 +142,7 @@ likelier to succeed on Windows 95/98 than on NT 4.0.
 ## Notes
 
 - The stream is created as a decoder channel (`BASS_STREAM_DECODE`) and wrapped in `BASS_FX_TempoCreate`, so the tempo can be changed live. `BASS_FX_FREESOURCE` ensures the source is freed automatically.
-<<<<<<< Updated upstream
 - The BPM row is hidden until you press `Ctrl+B`, and nothing is analysed while it is hidden. BASS_FX always returns its best guess, so material without a clear beat gives a meaningless number rather than nothing - which is why it is off by default. `Ctrl+Shift+B` hides it again. The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Pressing `Ctrl+B` again analyses from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection.
-- The recording captures exactly the samples the playing channel delivers, including the tempo change, because the encoder is attached to the tempo stream.
-- Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format; the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
-=======
-<<<<<<< HEAD
-- The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Press `Ctrl+B` to analyse again from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection. BASS_FX always returns its best guess, so material without a beat gives a meaningless number rather than nothing.
 - Mono is a DSP callback on the playing stream (`BASS_ChannelSetDSP`) that
   averages the channels of every frame and writes the average back to all of
   them. The chain runs in float, so the samples are averaged as they are, and
@@ -160,11 +154,5 @@ likelier to succeed on Windows 95/98 than on NT 4.0.
   (up to 64 bookmarks; a read-only folder simply means they do not persist).
   Positions are stored on the file's own timeline, so they stay correct
   whatever tempo or frequency is set when they are used.
-- The recording captures exactly the samples the playing channel delivers — including the tempo change — because the encoder is attached to the tempo stream.
-- Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format — the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
-=======
-- The BPM row is hidden until you press `Ctrl+B`, and nothing is analysed while it is hidden. BASS_FX always returns its best guess, so material without a clear beat gives a meaningless number rather than nothing - which is why it is off by default. `Ctrl+Shift+B` hides it again. The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Pressing `Ctrl+B` again analyses from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection.
 - The recording captures exactly the samples the playing channel delivers, including the tempo change, because the encoder is attached to the tempo stream.
 - Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format; the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
->>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
->>>>>>> Stashed changes

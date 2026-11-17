@@ -21,22 +21,11 @@
  *   Q / Shift+Q Frequency down / up (100 Hz);   Ctrl+Q reset to native
  *   Backspace   Reset tempo, pitch and frequency
  *   C           Command box (e.g. 30, +5, t75, p6, q44100, v150)
-<<<<<<< Updated upstream
- *   Ctrl+B      Show the BPM and detect it from the current position
- *   Ctrl+Shift+B  Hide the BPM row again
- *   R           Start recording what is playing (-> Music\BASS PlAIer)
-=======
-<<<<<<< HEAD
  *   M           Mono (downmix both channels, toggle)
  *   K           Add a bookmark at the current position
- *   Ctrl+B      Detect the BPM again from the current position
- *   R           Start recording what is playing (-> recording.wav)
-=======
  *   Ctrl+B      Show the BPM and detect it from the current position
  *   Ctrl+Shift+B  Hide the BPM row again
  *   R           Start recording what is playing (-> Music\BASS PlAIer)
->>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
->>>>>>> Stashed changes
  *   E           Stop recording
  *   1..9, 0          Cut EQ band 1 dB (1 = 80 Hz .. 0 = 14 kHz)  [10-band EQ]
  *   Shift+1..9, 0    Boost that EQ band 1 dB
@@ -94,7 +83,8 @@ enum {
     IDM_RESET_ALL,
     IDM_REC_START, IDM_REC_STOP,
     IDM_BM_ADD, IDM_BM_CLEAR,
-    IDM_HELP_KEYS, IDM_ABOUT
+    IDM_HELP_KEYS, IDM_ABOUT,
+    IDM_BPM_HIDE
 };
 #define IDM_BM_FIRST      2200   /* + n: jump to bookmark n */
 #define IDM_BM_DEL_FIRST  2300   /* + n: remove bookmark n */
@@ -172,15 +162,8 @@ static int  g_rowIdx[ROW_COUNT];
 static BOOL g_showTempo = FALSE;   /* Tempo row hidden while tempo == 0 % */
 static BOOL g_showPitch = FALSE;   /* Pitch row hidden while pitch == 0 */
 static BOOL g_showEq    = FALSE;   /* EQ rows hidden while every band == 0 dB */
-<<<<<<< Updated upstream
-static BOOL g_showBpm   = FALSE;   /* BPM row hidden until Ctrl+B asks for it */
-=======
-<<<<<<< HEAD
 static BOOL g_showMono  = FALSE;   /* Mono row hidden while playing in stereo */
-=======
 static BOOL g_showBpm   = FALSE;   /* BPM row hidden until Ctrl+B asks for it */
->>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
->>>>>>> Stashed changes
 
 static BOOL handleKey(HWND hwnd, WPARAM key);   /* forward */
 static void cueStop(void);                      /* forward (used by ListProc) */
@@ -287,15 +270,8 @@ static void rebuildRows(void)
     for (int r = 0; r < ROW_COUNT; r++) {
         if (r == ROW_TEMPO && !g_showTempo) continue;
         if (r == ROW_PITCH && !g_showPitch) continue;
-<<<<<<< Updated upstream
         if (r == ROW_BPM && !g_showBpm) continue;
-=======
-<<<<<<< HEAD
         if (r == ROW_MONO  && !g_showMono)  continue;
-=======
-        if (r == ROW_BPM && !g_showBpm) continue;
->>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
->>>>>>> Stashed changes
         if ((r == ROW_EQ_LO || r == ROW_EQ_HI) && !g_showEq) continue;
         LVITEM it = {0};
         it.mask = LVIF_TEXT;
@@ -365,23 +341,6 @@ static void buildList(HWND hwnd)
     SetFocus(g_hPlist);
 }
 
-<<<<<<< Updated upstream
-=======
-<<<<<<< HEAD
-/* ---- full path of a file next to the exe ----
- * Like loadPlugins below, this deliberately ignores the working directory:
- * opening a file from Explorer starts us in the folder of that file. */
-static BOOL exeFile(char *out, size_t n, const char *leaf)
-{
-    char dir[MAX_PATH];
-    DWORD got = GetModuleFileName(NULL, dir, MAX_PATH);
-    if (got == 0 || got >= MAX_PATH) return FALSE;
-    char *slash = strrchr(dir, '\\');
-    if (!slash) return FALSE;
-    *slash = 0;                     /* strip the exe name */
-    snprintf(out, n, "%s\\%s", dir, leaf);
-=======
->>>>>>> Stashed changes
 /* ---- helper: folder the exe lives in (dir is a MAX_PATH buffer) ---- */
 static BOOL exeDir(char *dir)
 {
@@ -390,11 +349,17 @@ static BOOL exeDir(char *dir)
     char *slash = strrchr(dir, '\\');
     if (!slash) return FALSE;
     *slash = 0;                     /* strip the exe name */
-<<<<<<< Updated upstream
-=======
->>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
->>>>>>> Stashed changes
     return TRUE;
+}
+
+/* ---- full path of a file next to the exe ----
+ * Resolved against the exe like the plugins folder, not the working
+ * directory; FALSE if the path would not fit. */
+static BOOL exeFile(char *out, size_t n, const char *leaf)
+{
+    char dir[MAX_PATH];
+    if (!exeDir(dir)) return FALSE;
+    return snprintf(out, n, "%s\\%s", dir, leaf) < (int)n;
 }
 
 /* ---- plugin loading: all .dll in the plugins folder next to the exe ----
@@ -602,9 +567,29 @@ static BOOL eqActive(void)
     return FALSE;
 }
 
-<<<<<<< Updated upstream
-=======
-<<<<<<< HEAD
+/* ---- anti-alias filter of the tempo stream ----
+ * BASS_FX runs everything through SoundTouch's anti-alias filter, even at
+ * rate 1. Its taps are rounded with +0.5 but never truncated in the float
+ * build, so the filter colours the sound slightly (residual about -70 dB).
+ * It is only needed when the rate differs from 1 (pitch, frequency, cue), so
+ * it is switched off otherwise and a recording stays bit-identical. */
+static void updateAAFilter(void)
+{
+    if (!g_stream) return;
+    BOOL need = g_cueing || g_pitch != 0.0f ||
+                (g_freqDef > 0.0f && g_freq != g_freqDef) ||
+                BASS_ChannelIsSliding(g_stream, BASS_ATTRIB_TEMPO_FREQ);
+    BASS_ChannelSetAttribute(g_stream, BASS_ATTRIB_TEMPO_OPTION_USE_AA_FILTER,
+                             need ? 1.0f : 0.0f);
+}
+
+/* a frequency glide (cue spin-up/down) has finished: re-check the filter */
+static void CALLBACK onSlideEnd(HSYNC handle, DWORD channel, DWORD data, void *user)
+{
+    (void)handle; (void)channel; (void)data; (void)user;
+    updateAAFilter();
+}
+
 /* ---- mono downmix ----
  * A DSP on the playing stream averages the channels of every frame and
  * writes the result back to all of them, so the same signal comes out of
@@ -646,33 +631,6 @@ static void toggleMono(void)
 {
     g_mono = !g_mono;
     setupMono();           /* takes effect on the next buffer */
-=======
->>>>>>> Stashed changes
-/* ---- anti-alias filter of the tempo stream ----
- * BASS_FX runs everything through SoundTouch's anti-alias filter, even at
- * rate 1. Its taps are rounded with +0.5 but never truncated in the float
- * build, so the filter colours the sound slightly (residual about -70 dB).
- * It is only needed when the rate differs from 1 (pitch, frequency, cue), so
- * it is switched off otherwise and a recording stays bit-identical. */
-static void updateAAFilter(void)
-{
-    if (!g_stream) return;
-    BOOL need = g_cueing || g_pitch != 0.0f ||
-                (g_freqDef > 0.0f && g_freq != g_freqDef) ||
-                BASS_ChannelIsSliding(g_stream, BASS_ATTRIB_TEMPO_FREQ);
-    BASS_ChannelSetAttribute(g_stream, BASS_ATTRIB_TEMPO_OPTION_USE_AA_FILTER,
-                             need ? 1.0f : 0.0f);
-}
-
-/* a frequency glide (cue spin-up/down) has finished: re-check the filter */
-static void CALLBACK onSlideEnd(HSYNC handle, DWORD channel, DWORD data, void *user)
-{
-    (void)handle; (void)channel; (void)data; (void)user;
-    updateAAFilter();
-<<<<<<< Updated upstream
-=======
->>>>>>> 2690ae6d64d974a01e4bd5112275bcc96f7383b9
->>>>>>> Stashed changes
 }
 
 /* ---- playlist handling ---- */
@@ -1298,6 +1256,23 @@ static void runCommand(HWND hwnd)
 }
 
 
+/* ---- BPM row on demand ----
+ * Hidden by default: BASS_FX always returns a guess, which is noise on
+ * material without a beat. Nothing is analysed while the row is hidden. */
+static void showBpm(void)          /* Ctrl+B: show the row and detect from here */
+{
+    if (!g_showBpm) { g_showBpm = TRUE; rebuildRows(); }
+    startBpmScan(curPos());
+}
+
+static void hideBpm(void)          /* Ctrl+Shift+B: hide it again */
+{
+    if (!g_showBpm) return;
+    g_showBpm = FALSE;
+    cancelBpm();                   /* discard a running scan */
+    rebuildRows();
+}
+
 /* ---- bookmarks ----
  * A bookmark is a named position in a file. The list lives in a plain
  * tab-separated text file next to the exe, one line per bookmark, so it
@@ -1500,7 +1475,8 @@ static void buildMenu(HWND hwnd)
     AppendMenu(play, MF_STRING, IDM_FWD30,   "Forward 30 seconds\tCtrl+Right");
     AppendMenu(play, MF_STRING, IDM_GOTO,    "&Go to / command...\tC");
     AppendMenu(play, MF_SEPARATOR, 0, NULL);
-    AppendMenu(play, MF_STRING, IDM_BPM,     "Detect B&PM again\tCtrl+B");
+    AppendMenu(play, MF_STRING, IDM_BPM,      "Show and detect B&PM\tCtrl+B");
+    AppendMenu(play, MF_STRING, IDM_BPM_HIDE, "&Hide BPM\tCtrl+Shift+B");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)play, "&Play");
 
     HMENU tempo = CreatePopupMenu();
@@ -1585,7 +1561,7 @@ static void updateMenuState(HWND hwnd)
      * setting are kept across files, so those stay available) */
     static const int needStream[] = {
         IDM_PLAY, IDM_RESTART, IDM_REVERSE, IDM_BACK5, IDM_FWD5,
-        IDM_BACK30, IDM_FWD30, IDM_GOTO, IDM_BPM,
+        IDM_BACK30, IDM_FWD30, IDM_GOTO,
         IDM_TEMPO_DN, IDM_TEMPO_UP, IDM_TEMPO_RST,
         IDM_PITCH_DN, IDM_PITCH_UP, IDM_PITCH_RST,
         IDM_FREQ_DN, IDM_FREQ_UP, IDM_FREQ_RST,
@@ -1614,6 +1590,8 @@ static void updateMenuState(HWND hwnd)
         (g_rec ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(bar, IDM_BM_CLEAR, MF_BYCOMMAND |
         (g_bmCount > 0 ? MF_ENABLED : MF_GRAYED));
+    EnableMenuItem(bar, IDM_BPM_HIDE, MF_BYCOMMAND |
+        (g_showBpm ? MF_ENABLED : MF_GRAYED));
 
     CheckMenuItem(bar, IDM_REVERSE, MF_BYCOMMAND |
         (g_reverse ? MF_CHECKED : MF_UNCHECKED));
@@ -1641,8 +1619,9 @@ static void showKeys(HWND hwnd)
         "I           Cut all EQ bands (Shift boost, Ctrl flat)\r\n"
         "Backspace   Reset tempo, pitch and frequency\r\n"
         "C           Command box (30, +5, t75, p6, q44100, v150)\r\n"
-        "Ctrl+B      Detect the BPM again from here\r\n"
-        "R / E       Start / stop recording\r\n"
+        "Ctrl+B      Show the BPM and detect it from here\r\n"
+        "Ctrl+Shift+B  Hide the BPM row\r\n"
+        "R / E       Start / stop recording (to Music\\BASS PlAIer)\r\n"
         "Alt+F4      Quit",
         "Keyboard shortcuts", MB_OK | MB_ICONINFORMATION);
 }
@@ -1684,7 +1663,8 @@ static void menuCommand(HWND hwnd, int id)
     case IDM_BACK30:  seekBy(-30.0);   break;
     case IDM_FWD30:   seekBy(+30.0);   break;
     case IDM_GOTO:    runCommand(hwnd);       break;
-    case IDM_BPM:     startBpmScan(curPos()); break;
+    case IDM_BPM:      showBpm(); break;
+    case IDM_BPM_HIDE: hideBpm(); break;
 
     case IDM_MONO:      toggleMono();        break;
     case IDM_TEMPO_DN:  changeTempo(-1.0f);  break;
@@ -1767,18 +1747,9 @@ static BOOL handleKey(HWND hwnd, WPARAM key)
                     else if (shift)  changeVol(+0.01f);    /* Shift+V: up   */
                     else             changeVol(-0.01f);    /* V: down       */
                     break;
-    case 'B':       if (ctrl && shift) {               /* Ctrl+Shift+B: hide it again */
-                        if (g_showBpm) {
-                            g_showBpm = FALSE;
-                            cancelBpm();                 /* discard a running scan */
-                            rebuildRows();
-                        }
-                    } else if (ctrl) {                   /* Ctrl+B: show it and detect */
-                        if (!g_showBpm) { g_showBpm = TRUE; rebuildRows(); }
-                        startBpmScan(curPos());
-                    } else {
-                        toggleReverse();                 /* B: play backwards on/off */
-                    }
+    case 'B':       if (ctrl && shift) hideBpm();      /* Ctrl+Shift+B: hide the BPM */
+                    else if (ctrl)     showBpm();      /* Ctrl+B: show it and detect */
+                    else               toggleReverse(); /* B: play backwards on/off */
                     break;
     case VK_F11:    cueStart(-1); break;     /* hold = fast rewind  (tape style) */
     case VK_F12:    cueStart(+1); break;     /* hold = fast forward (tape style) */
